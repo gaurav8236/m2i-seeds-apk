@@ -1,0 +1,146 @@
+class StockItem {
+  final String id;
+  final double currentStock;
+  final double sellingPrice;
+  final double lowStockLimit;
+  final List<String> aliases;
+  final String itemName;
+  final String category;
+  final String unit;
+
+  StockItem({
+    required this.id,
+    required this.currentStock,
+    required this.sellingPrice,
+    required this.lowStockLimit,
+    required this.aliases,
+    required this.itemName,
+    required this.category,
+    required this.unit,
+  });
+
+  factory StockItem.fromMap(Map<String, dynamic> map) {
+    final master = map['master_inventory'] as Map<String, dynamic>? ?? {};
+    return StockItem(
+      id: map['id']?.toString() ?? '',
+      currentStock: (map['current_stock'] as num?)?.toDouble() ?? 0,
+      sellingPrice: (map['selling_price'] as num?)?.toDouble() ?? 0,
+      lowStockLimit: (map['low_stock_limit'] as num?)?.toDouble() ?? 10,
+      aliases: List<String>.from(map['aliases'] ?? []),
+      itemName: master['item_name']?.toString() ?? '',
+      category: master['category']?.toString() ?? '',
+      unit: master['unit']?.toString() ?? '',
+    );
+  }
+
+  bool get isLow => currentStock <= lowStockLimit;
+}
+
+class BillItem {
+  String itemName;
+  double quantity;
+  double pricePerUnit;
+  double itemTotal;
+  double stockRemaining;
+  String? stockId;
+  double currentStock;
+  String unit;
+  bool hasError;
+  String errorMessage;
+
+  BillItem({
+    required this.itemName,
+    required this.quantity,
+    required this.pricePerUnit,
+    required this.itemTotal,
+    required this.stockRemaining,
+    this.stockId,
+    required this.currentStock,
+    required this.unit,
+    this.hasError = false,
+    this.errorMessage = '',
+  });
+
+  factory BillItem.fromMap(Map<String, dynamic> map) {
+    return BillItem(
+      itemName: map['item_name']?.toString() ?? '',
+      quantity: (map['quantity_billed'] as num?)?.toDouble() ?? 1,
+      pricePerUnit: (map['price_per_unit'] as num?)?.toDouble() ?? 0,
+      itemTotal: (map['item_total'] as num?)?.toDouble() ?? 0,
+      stockRemaining: (map['stock_remaining'] as num?)?.toDouble() ?? 0,
+      stockId: map['stock_id']?.toString(),
+      currentStock: (map['current_stock'] as num?)?.toDouble() ?? 0,
+      unit: map['unit']?.toString() ?? '',
+      hasError: map['error'] != null && map['error'] != false,
+      errorMessage: map['error'] is String ? map['error'] : '',
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+    'stock_id': stockId,
+    'new_stock': stockRemaining >= 0 ? stockRemaining : 0,
+    'item_name': itemName,
+    'quantity_billed': quantity,
+    'price_per_unit': pricePerUnit,
+    'item_total': itemTotal,
+    'unit': unit,
+    'error': hasError,
+  };
+}
+
+class Bill {
+  final String id;
+  final DateTime createdAt;
+  final String? customerName;
+  final double totalAmount;
+  final double? discountAmount;
+  final bool isCredit;
+  final List<Map<String, dynamic>> billDetails;
+
+  Bill({
+    required this.id,
+    required this.createdAt,
+    this.customerName,
+    required this.totalAmount,
+    this.discountAmount,
+    required this.isCredit,
+    required this.billDetails,
+  });
+
+  factory Bill.fromMap(Map<String, dynamic> map) {
+    return Bill(
+      id: map['id']?.toString() ?? '',
+      createdAt: DateTime.tryParse(map['created_at'] ?? '') ?? DateTime.now(),
+      customerName: map['customer_name']?.toString(),
+      totalAmount: (map['total_amount'] as num?)?.toDouble() ?? 0,
+      discountAmount: (map['discount_amount'] as num?)?.toDouble(),
+      isCredit: map['is_credit'] == true,
+      billDetails: List<Map<String, dynamic>>.from(map['bill_details'] ?? []),
+    );
+  }
+}
+
+class MasterItem {
+  final String id;
+  final String itemName;
+  final String category;
+  final String unit;
+
+  String get name => itemName;
+
+  MasterItem({
+    required this.id,
+    required this.itemName,
+    required this.category,
+    required this.unit,
+  });
+
+  factory MasterItem.fromMap(Map<String, dynamic> map) {
+    return MasterItem(
+      id: map['id']?.toString() ?? '',
+      itemName: map['item_name']?.toString() ?? '',
+      category: map['category']?.toString() ?? '',
+      unit: map['unit']?.toString() ?? '',
+    );
+  }
+}
