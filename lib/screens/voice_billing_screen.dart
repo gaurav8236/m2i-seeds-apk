@@ -79,17 +79,30 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
   }
 
   Future<void> _startRecording() async {
-    final status = await Permission.microphone.request();
+    var status = await Permission.microphone.status;
+
     if (!status.isGranted) {
-      _showSnack('माइक की अनुमति चाहिए');
+      status = await Permission.microphone.request();
+      if (!status.isGranted) {
+        if (mounted) _showSnack('माइक की अनुमति चाहिए');
+        return;
+      }
+      // Permission just granted — Android hasn't propagated it to the audio
+      // subsystem yet. Return and let the user tap once more to start recording.
+      if (mounted) _showSnack('अनुमति मिल गई! अब माइक दबाएं');
       return;
     }
-    await VoiceService.startRecording();
-    setState(() {
-      _isRecording = true;
-      _spokenText = '';
-      _billItems = [];
-    });
+
+    try {
+      await VoiceService.startRecording();
+      setState(() {
+        _isRecording = true;
+        _spokenText = '';
+        _billItems = [];
+      });
+    } catch (e) {
+      if (mounted) _showSnack('रिकॉर्डिंग शुरू नहीं हो सकी: $e');
+    }
   }
 
   Future<void> _stopRecording() async {

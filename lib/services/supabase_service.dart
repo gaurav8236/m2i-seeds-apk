@@ -1,34 +1,19 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/models.dart';
 import '../supabase_config.dart';
+import 'auth_service.dart';
 
 class SupabaseService {
   static final _client = Supabase.instance.client;
 
-  // ── User ID ────────────────────────────────────────────────────────────────
-
-  static Future<String?> resolveUserId() async {
-    final prefs = await SharedPreferences.getInstance();
-    String? userId = prefs.getString('demoUserId');
-
-    if (userId == null) {
-      // Try to get first existing user
-      final res = await _client.from('users').select('id').limit(1);
-      if (res.isNotEmpty) {
-        userId = res.first['id'].toString();
-        await prefs.setString('demoUserId', userId);
-      }
-    }
-    return userId;
-  }
+  static String? get _userId => AuthService.userId;
 
   // ── Stock ──────────────────────────────────────────────────────────────────
 
   static Future<List<StockItem>> fetchStock() async {
-    final userId = await resolveUserId();
+    final userId = _userId;
     if (userId == null) return [];
 
     final res = await _client
@@ -47,7 +32,7 @@ class SupabaseService {
   }
 
   static Future<void> upsertInventoryItems(List<Map<String, dynamic>> items) async {
-    final userId = await resolveUserId();
+    final userId = _userId;
     if (userId == null) return;
 
     await _client.rpc('upsert_inventory_item', params: {
@@ -59,7 +44,7 @@ class SupabaseService {
   // ── Bills ──────────────────────────────────────────────────────────────────
 
   static Future<List<Bill>> fetchPastBills() async {
-    final userId = await resolveUserId();
+    final userId = _userId;
     if (userId == null) return [];
 
     final res = await _client
@@ -72,7 +57,7 @@ class SupabaseService {
   }
 
   static Future<List<String>> fetchCustomerNames() async {
-    final userId = await resolveUserId();
+    final userId = _userId;
     if (userId == null) return [];
 
     final res = await _client
@@ -98,8 +83,8 @@ class SupabaseService {
     String? customerName,
     required bool isCredit,
   }) async {
-    final userId = await resolveUserId();
-    if (userId == null) throw Exception('No user ID');
+    final userId = _userId;
+    if (userId == null) throw Exception('Not authenticated');
 
     final response = await http.post(
       Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-checkout/'),
@@ -122,7 +107,7 @@ class SupabaseService {
   // ── Month Stats ────────────────────────────────────────────────────────────
 
   static Future<Map<String, double>> fetchMonthStats() async {
-    final userId = await resolveUserId();
+    final userId = _userId;
     if (userId == null) return {'credit': 0, 'paid': 0};
 
     final now = DateTime.now();
@@ -149,7 +134,7 @@ class SupabaseService {
   // ── Customer Ledger ────────────────────────────────────────────────────────
 
   static Future<List<Map<String, dynamic>>> fetchCustomerLedger(String customerName) async {
-    final userId = await resolveUserId();
+    final userId = _userId;
     if (userId == null) return [];
 
     final res = await _client
@@ -170,8 +155,8 @@ class SupabaseService {
     required String customerName,
     required double amount,
   }) async {
-    final userId = await resolveUserId();
-    if (userId == null) throw Exception('No user ID');
+    final userId = _userId;
+    if (userId == null) throw Exception('Not authenticated');
 
     final response = await http.post(
       Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-checkout/'),

@@ -6,7 +6,8 @@ import '../theme.dart';
 import 'past_bills_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final void Function(int) onTabChange;
+  const HomeScreen({super.key, required this.onTabChange});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -254,11 +255,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _newBillCTA(BuildContext context) {
     return GestureDetector(
-      onTap: () {
-        // Switch to billing tab (index 1)
-        final appShell = context.findAncestorStateOfType<State>();
-        // handled by bottom nav in parent
-      },
+      onTap: () => widget.onTabChange(1),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         decoration: BoxDecoration(
@@ -305,9 +302,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _actionCard(BuildContext context, IconData icon, String title, String subtitle, int tabIndex) {
     return GestureDetector(
-      onTap: () {
-        // Navigate to tab — parent handles
-      },
+      onTap: () => widget.onTabChange(tabIndex),
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(

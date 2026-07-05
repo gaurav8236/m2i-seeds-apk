@@ -1,10 +1,9 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../supabase_config.dart';
+import 'auth_service.dart';
 
 class VoiceService {
   static final _recorder = AudioRecorder();
@@ -39,9 +38,8 @@ class VoiceService {
     required String audioPath,
     String? webSpeechText,
   }) async {
-    final prefs = await SharedPreferences.getInstance();
-    final userId = prefs.getString('demoUserId');
-    if (userId == null) throw Exception('No user ID');
+    final userId = AuthService.userId;
+    if (userId == null) throw Exception('Not authenticated');
 
     final request = http.MultipartRequest(
       'POST',
