@@ -15,23 +15,23 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _currentIndex = 0;
 
-  final _screens = const [
-    HomeScreen(),
-    VoiceBillingScreen(),
-    InventoryScreen(),
-    ReportsScreen(),
-  ];
+  void _changeTab(int index) => setState(() => _currentIndex = index);
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
-        children: _screens,
+        children: [
+          HomeScreen(onTabChange: _changeTab),
+          const VoiceBillingScreen(),
+          const InventoryScreen(),
+          const ReportsScreen(),
+        ],
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (i) => setState(() => _currentIndex = i),
+        onTap: _changeTab,
         selectedItemColor: AppColors.primary,
         unselectedItemColor: AppColors.textMuted,
         backgroundColor: Colors.white,

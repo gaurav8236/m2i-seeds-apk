@@ -50,5 +50,8 @@
             <action android:name="android.intent.action.PROCESS_TEXT" />
             <data android:mimeType="text/plain" />
         </intent>
+        <intent>
+            <action android:name="com.google.android.gms.auth.GOOGLE_SIGN_IN" />
+        </intent>
     </queries>
 </manifest>
