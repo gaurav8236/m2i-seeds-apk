@@ -36,20 +36,36 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
   final _customerController = TextEditingController();
   bool _showCustomerSuggestions = false;
 
-  // Waveform animation
-  late AnimationController _waveController;
+  // Voice AI animation — 3 staggered pulse rings + mic breathe
+  late List<AnimationController> _ringControllers;
+  late AnimationController _breatheController;
 
   @override
   void initState() {
     super.initState();
-    _waveController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800))
-      ..repeat(reverse: true);
+    // 3 rings staggered 500ms apart — pulse outward and fade
+    _ringControllers = List.generate(3, (i) {
+      final ctrl = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 1800),
+      );
+      Future.delayed(Duration(milliseconds: i * 600), () {
+        if (mounted) ctrl.repeat();
+      });
+      return ctrl;
+    });
+    // Mic button breathes gently while recording
+    _breatheController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
     _loadData();
   }
 
   @override
   void dispose() {
-    _waveController.dispose();
+    for (final c in _ringControllers) c.dispose();
+    _breatheController.dispose();
     _customerController.dispose();
     VoiceService.dispose();
     super.dispose();
@@ -424,47 +440,64 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
       ),
       child: Column(
         children: [
-          // Mic button
-          GestureDetector(
-            onTap: _isProcessing ? null : (_isRecording ? _stopRecording : _startRecording),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 88, height: 88,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: _isRecording
-                    ? const LinearGradient(
-                        colors: [Color(0xFFDC2626), Color(0xFFEF4444)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      )
-                    : primaryGradient,
-                boxShadow: [
-                  BoxShadow(
-                    color: (_isRecording ? AppColors.danger : AppColors.primary).withOpacity(0.35),
-                    blurRadius: 24,
-                    offset: const Offset(0, 8),
+          // Mic button with pulsing rings
+          SizedBox(
+            width: 200,
+            height: 200,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // 3 staggered pulse rings (only when recording)
+                if (_isRecording)
+                  ..._ringControllers.map((ctrl) => _pulseRing(ctrl)),
+
+                // Mic button — breathes while recording
+                GestureDetector(
+                  onTap: _isProcessing ? null : (_isRecording ? _stopRecording : _startRecording),
+                  child: AnimatedBuilder(
+                    animation: _breatheController,
+                    builder: (_, child) {
+                      final scale = _isRecording
+                          ? 1.0 + _breatheController.value * 0.07
+                          : 1.0;
+                      return Transform.scale(
+                        scale: scale,
+                        child: child,
+                      );
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      width: 88, height: 88,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: _isRecording
+                            ? const LinearGradient(
+                                colors: [Color(0xFFDC2626), Color(0xFFEF4444)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              )
+                            : primaryGradient,
+                        boxShadow: [
+                          BoxShadow(
+                            color: (_isRecording ? AppColors.danger : AppColors.primary)
+                                .withOpacity(_isRecording ? 0.55 : 0.35),
+                            blurRadius: _isRecording ? 32 : 24,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: _isProcessing
+                          ? const Padding(
+                              padding: EdgeInsets.all(24),
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+                            )
+                          : const Icon(Icons.mic, color: Colors.white, size: 34),
+                    ),
                   ),
-                ],
-              ),
-              child: _isProcessing
-                  ? const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
-                    )
-                  : const Icon(Icons.mic, color: Colors.white, size: 34),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 16),
-
-          // Waveform
-          if (_isRecording)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(8, (i) => _waveBar(i)),
-            ),
-
-          const SizedBox(height: 8),
 
           // Status text
           if (_isProcessing)
@@ -526,18 +559,26 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
     );
   }
 
-  Widget _waveBar(int i) {
+  Widget _pulseRing(AnimationController ctrl) {
     return AnimatedBuilder(
-      animation: _waveController,
+      animation: ctrl,
       builder: (_, __) {
-        final height = 8 + (24 * (0.5 + 0.5 * (_waveController.value + i * 0.12).clamp(0, 1)));
-        return Container(
-          width: 3,
-          height: height,
-          margin: const EdgeInsets.symmetric(horizontal: 2),
-          decoration: BoxDecoration(
-            color: AppColors.danger,
-            borderRadius: BorderRadius.circular(2),
+        final t = ctrl.value;
+        // Ease out: fast expand, slow fade
+        final scale = 0.9 + t * 1.35;
+        final opacity = (1 - t) * (_isRecording ? 0.4 : 0.0);
+        return Transform.scale(
+          scale: scale,
+          child: Container(
+            width: 88,
+            height: 88,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: AppColors.danger.withOpacity(opacity),
+                width: 2.5,
+              ),
+            ),
           ),
         );
       },
