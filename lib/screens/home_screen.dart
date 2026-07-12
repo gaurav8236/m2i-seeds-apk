@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/models.dart';
+import '../services/auth_service.dart';
 import '../services/supabase_service.dart';
 import '../theme.dart';
 import 'past_bills_screen.dart';
+import 'profile_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final void Function(int) onTabChange;
@@ -15,9 +17,12 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   bool _loading = true;
-  double _credit = 0, _paid = 0;
+  double _credit = 0, _paid = 0, _outstanding = 0;
   int _lowStockCount = 0;
   List<Bill> _recentBills = [];
+  StatsPeriod _period = StatsPeriod.today;
+  String? _avatarUrl;
+  String? _displayName;
 
   @override
   void initState() {
@@ -25,22 +30,82 @@ class _HomeScreenState extends State<HomeScreen> {
     _load();
   }
 
+  DateTimeRange _rangeFor(StatsPeriod p) {
+    final now = DateTime.now();
+    switch (p) {
+      case StatsPeriod.today:
+        return DateTimeRange(
+            start: DateTime(now.year, now.month, now.day), end: now);
+      case StatsPeriod.thisWeek:
+        return DateTimeRange(
+            start: now.subtract(Duration(days: now.weekday - 1)), end: now);
+      case StatsPeriod.thisMonth:
+        return DateTimeRange(
+            start: DateTime(now.year, now.month, 1), end: now);
+      case StatsPeriod.custom:
+        return DateTimeRange(
+            start: DateTime(now.year, now.month, 1), end: now);
+    }
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final stats = await SupabaseService.fetchMonthStats();
-      final stock = await SupabaseService.fetchStock();
-      final bills = await SupabaseService.fetchPastBills();
+      final range = _rangeFor(_period);
+      final results = await Future.wait([
+        SupabaseService.fetchFilteredStats(from: range.start, to: range.end),
+        SupabaseService.fetchTotalOutstanding(),
+        SupabaseService.fetchStock(),
+        SupabaseService.fetchPastBills(),
+        AuthService.fetchProfile(),
+      ]);
+      final stats = results[0] as Map<String, double>;
+      final outstanding = results[1] as double;
+      final stock = results[2] as List<StockItem>;
+      final bills = results[3] as List<Bill>;
+      final profile = results[4] as Map<String, String?>;
       setState(() {
         _credit = stats['credit'] ?? 0;
         _paid = stats['paid'] ?? 0;
+        _outstanding = outstanding;
         _lowStockCount = stock.where((s) => s.isLow).length;
         _recentBills = bills.take(4).toList();
+        _avatarUrl = profile['photo_url'];
+        _displayName = profile['display_name'] ?? profile['google_name'];
       });
     } catch (e) {
       debugPrint('Home load error: $e');
     } finally {
       setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _pickCustomRange() async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 1),
+      lastDate: now,
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: const ColorScheme.light(primary: AppColors.primary),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null) {
+      setState(() => _period = StatsPeriod.custom);
+      setState(() => _loading = true);
+      try {
+        final stats = await SupabaseService.fetchFilteredStats(
+            from: picked.start, to: picked.end);
+        setState(() {
+          _credit = stats['credit'] ?? 0;
+          _paid = stats['paid'] ?? 0;
+        });
+      } finally {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -82,53 +147,55 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Brand row
+                        // Brand row with avatar
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Row(
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Container(
-                                  width: 36, height: 36,
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.15),
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: Colors.white.withOpacity(0.25)),
-                                  ),
-                                  child: const Icon(Icons.mic, color: Colors.white, size: 18),
-                                ),
-                                const SizedBox(width: 10),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text('SmartDukan',
-                                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
-                                    Text('दुकानदार सहायक',
-                                        style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 11)),
-                                  ],
-                                ),
+                                const Text('SmartDukan',
+                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+                                Text('दुकानदार सहायक',
+                                    style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 11)),
                               ],
                             ),
-                            Text(
-                              DateFormat('d MMM').format(DateTime.now()),
-                              style: TextStyle(color: Colors.white.withOpacity(0.82), fontSize: 12),
+                            GestureDetector(
+                              onTap: () => Navigator.push(context,
+                                  MaterialPageRoute(builder: (_) => const ProfileScreen()))
+                                  .then((_) => _load()),
+                              child: _buildAvatar(),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 20),
-                        // Stats row
+                        const SizedBox(height: 16),
+                        // Period filter chips
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              _periodChip('आज', StatsPeriod.today),
+                              const SizedBox(width: 8),
+                              _periodChip('यह हफ़्ता', StatsPeriod.thisWeek),
+                              const SizedBox(width: 8),
+                              _periodChip('यह महीना', StatsPeriod.thisMonth),
+                              const SizedBox(width: 8),
+                              _customChip(),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        // Stats row — only उधार दिया + नकद जमा (period-filtered)
                         Container(
-                          padding: const EdgeInsets.only(top: 16),
+                          padding: const EdgeInsets.only(top: 14),
                           decoration: BoxDecoration(
                             border: Border(top: BorderSide(color: Colors.white.withOpacity(0.18))),
                           ),
                           child: Row(
                             children: [
-                              _statCell('उधार दिया', _credit, true),
+                              _statCell('उधार दिया', _credit),
                               _divider(),
-                              _statCell('नकद जमा', _paid, false),
-                              _divider(),
-                              _statCell('बकाया', _credit > 0 ? _credit : 0, false),
+                              _statCell('नकद जमा', _paid),
                             ],
                           ),
                         ),
@@ -146,6 +213,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   // ── Low stock alert ──────────────────────────────────
                   if (!_loading && _lowStockCount > 0)
                     _lowStockBanner(),
+
+                  // ── बकाया card (always-current, not period-filtered) ──
+                  _bakayaCard(),
+                  const SizedBox(height: 4),
 
                   // ── New Bill CTA ─────────────────────────────────────
                   _newBillCTA(context),
@@ -191,29 +262,156 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _statCell(String label, double value, bool hasBorder) {
+  Widget _buildAvatar() {
+    final initials = (_displayName ?? 'U')
+        .trim()
+        .split(' ')
+        .take(2)
+        .map((w) => w.isNotEmpty ? w[0].toUpperCase() : '')
+        .join();
+    return Container(
+      width: 38, height: 38,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.white.withOpacity(0.2),
+        border: Border.all(color: Colors.white.withOpacity(0.4), width: 1.5),
+        image: _avatarUrl != null
+            ? DecorationImage(image: NetworkImage(_avatarUrl!), fit: BoxFit.cover)
+            : null,
+      ),
+      child: _avatarUrl == null
+          ? Center(
+              child: Text(initials,
+                  style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14)))
+          : null,
+    );
+  }
+
+  Widget _periodChip(String label, StatsPeriod period) {
+    final active = _period == period;
+    return GestureDetector(
+      onTap: () {
+        if (_period == period) return;
+        setState(() => _period = period);
+        _load();
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(
+          color: active ? Colors.white : Colors.white.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white.withOpacity(active ? 0 : 0.3)),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12, fontWeight: FontWeight.w600,
+            color: active ? AppColors.primary : Colors.white,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _customChip() {
+    final active = _period == StatsPeriod.custom;
+    return GestureDetector(
+      onTap: _pickCustomRange,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(
+          color: active ? Colors.white : Colors.white.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white.withOpacity(active ? 0 : 0.3)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.date_range, size: 12,
+              color: active ? AppColors.primary : Colors.white),
+          const SizedBox(width: 4),
+          Text('कस्टम',
+              style: TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w600,
+                color: active ? AppColors.primary : Colors.white,
+              )),
+        ]),
+      ),
+    );
+  }
+
+  Widget _statCell(String label, double value) {
     return Expanded(
       child: Column(
         children: [
           Text(
             _loading ? '—' : _fmt(value),
             style: const TextStyle(
-              color: Colors.white, fontWeight: FontWeight.w800, fontSize: 22, letterSpacing: -0.5),
+                color: Colors.white, fontWeight: FontWeight.w800, fontSize: 22, letterSpacing: -0.5),
           ),
           const SizedBox(height: 4),
           Text(label,
-              style: TextStyle(color: Colors.white.withOpacity(0.82), fontSize: 10, fontWeight: FontWeight.w500)),
+              style: TextStyle(
+                  color: Colors.white.withOpacity(0.82), fontSize: 10, fontWeight: FontWeight.w500)),
         ],
       ),
     );
   }
 
   Widget _divider() => Container(
-        height: 36,
-        width: 1,
+        height: 36, width: 1,
         color: Colors.white.withOpacity(0.18),
         margin: const EdgeInsets.symmetric(horizontal: 8),
       );
+
+  Widget _bakayaCard() {
+    return GestureDetector(
+      onTap: () => widget.onTabChange(3),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF1F1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFFFCACA)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color: AppColors.dangerLight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.account_balance_wallet_outlined,
+                  color: AppColors.danger, size: 18),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('कुल बकाया उधार',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                        color: AppColors.danger)),
+                Text(
+                  _loading ? '—' : _fmt(_outstanding),
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800,
+                      color: AppColors.danger, letterSpacing: -0.5),
+                ),
+              ]),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: AppColors.danger,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Text('देखें',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                      color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _lowStockBanner() {
     return GestureDetector(
