@@ -49,4 +49,63 @@ class AuthService {
       _userRowEnsured = true;
     } catch (_) {}
   }
+
+  static Future<bool> hasSeenOnboarding() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return true;
+    try {
+      final res = await _supabase
+          .from('users')
+          .select('has_seen_onboarding')
+          .eq('id', user.id)
+          .single();
+      return res['has_seen_onboarding'] == true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<void> markOnboardingComplete() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+    await _supabase
+        .from('users')
+        .update({'has_seen_onboarding': true})
+        .eq('id', user.id);
+  }
+
+  static Future<Map<String, String?>> fetchProfile() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return {};
+    try {
+      final res = await _supabase
+          .from('users')
+          .select('display_name, shop_name')
+          .eq('id', user.id)
+          .single();
+      return {
+        'display_name': res['display_name']?.toString(),
+        'shop_name': res['shop_name']?.toString(),
+        'email': user.email,
+        'photo_url': user.userMetadata?['avatar_url']?.toString(),
+        'google_name': user.userMetadata?['full_name']?.toString(),
+      };
+    } catch (_) {
+      return {
+        'email': user.email,
+        'google_name': user.userMetadata?['full_name']?.toString(),
+        'photo_url': user.userMetadata?['avatar_url']?.toString(),
+      };
+    }
+  }
+
+  static Future<void> updateProfile({String? displayName, String? shopName}) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+    final updates = <String, dynamic>{};
+    if (displayName != null) updates['display_name'] = displayName;
+    if (shopName != null) updates['shop_name'] = shopName;
+    if (updates.isEmpty) return;
+    await _supabase.from('users').update(updates).eq('id', user.id);
+  }
 }
