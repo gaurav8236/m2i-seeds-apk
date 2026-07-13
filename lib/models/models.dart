@@ -144,3 +144,65 @@ class MasterItem {
     );
   }
 }
+
+class Customer {
+  final String id;
+  final String name;
+  final String? phone;
+  final double openingBalance;
+  final DateTime createdAt;
+  // Computed from past_bills after fetch:
+  double outstanding;
+  DateTime? lastPurchaseAt;
+
+  Customer({
+    required this.id,
+    required this.name,
+    this.phone,
+    required this.openingBalance,
+    required this.createdAt,
+    this.outstanding = 0,
+    this.lastPurchaseAt,
+  });
+
+  factory Customer.fromMap(Map<String, dynamic> map) {
+    return Customer(
+      id: map['id']?.toString() ?? '',
+      name: map['name']?.toString() ?? '',
+      phone: map['phone']?.toString(),
+      openingBalance: (map['opening_balance'] as num?)?.toDouble() ?? 0,
+      createdAt: DateTime.tryParse(map['created_at'] ?? '') ?? DateTime.now(),
+    );
+  }
+}
+
+class StockHistoryEntry {
+  final String id;
+  final String stockId;
+  final double quantityBefore;
+  final double quantityAfter;
+  final String eventType;
+  final DateTime createdAt;
+
+  double get quantityAdded => quantityAfter - quantityBefore;
+
+  StockHistoryEntry({
+    required this.id,
+    required this.stockId,
+    required this.quantityBefore,
+    required this.quantityAfter,
+    required this.eventType,
+    required this.createdAt,
+  });
+
+  factory StockHistoryEntry.fromMap(Map<String, dynamic> map) {
+    return StockHistoryEntry(
+      id: map['id']?.toString() ?? '',
+      stockId: map['stock_id']?.toString() ?? '',
+      quantityBefore: (map['quantity_before'] as num?)?.toDouble() ?? 0,
+      quantityAfter: (map['quantity_after'] as num?)?.toDouble() ?? 0,
+      eventType: map['event_type']?.toString() ?? 'restock',
+      createdAt: DateTime.tryParse(map['created_at'] ?? '') ?? DateTime.now(),
+    );
+  }
+}

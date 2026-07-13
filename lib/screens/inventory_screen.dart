@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/supabase_service.dart';
 import '../theme.dart';
+import 'stock_item_detail_screen.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
@@ -12,7 +13,7 @@ class InventoryScreen extends StatefulWidget {
 
 class _InventoryScreenState extends State<InventoryScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabCtrl = TabController(length: 2, vsync: this);
+  late final TabController _tabCtrl = TabController(length: 2, vsync: this, initialIndex: 1);
 
   List<StockItem> _stock = [];
   List<MasterItem> _masterInventory = [];
@@ -660,98 +661,103 @@ class _InventoryScreenState extends State<InventoryScreen>
 
   Widget _stockCard(StockItem s) {
     final isLow = s.isLow;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-            color: isLow ? const Color(0xFFFFCACA) : const Color(0xFFF1F5F9)),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 10,
-              offset: const Offset(0, 2))
-        ],
-      ),
-      padding: const EdgeInsets.all(14),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(s.itemName,
-                style: const TextStyle(
-                    fontWeight: FontWeight.w700, fontSize: 15,
-                    color: AppColors.textPrimary)),
-            const SizedBox(height: 4),
-            if (s.category.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppColors.surface2,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Text(s.category,
-                    style: const TextStyle(
-                        fontSize: 11, fontWeight: FontWeight.w500,
-                        color: AppColors.textSecondary)),
+    final priceStr = s.sellingPrice % 1 == 0
+        ? s.sellingPrice.toInt().toString()
+        : s.sellingPrice.toStringAsFixed(2);
+    final stockStr = s.currentStock % 1 == 0
+        ? s.currentStock.toInt().toString()
+        : s.currentStock.toStringAsFixed(1);
+
+    return GestureDetector(
+      onTap: () => _openItemDetail(s),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isLow ? const Color(0xFFFFCACA) : AppColors.border),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        child: Row(
+          children: [
+            // Left: name + category badge
+            Expanded(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Flexible(
+                    child: Text(
+                      s.itemName,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 14,
+                          color: AppColors.textPrimary),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (s.category.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF3C7),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        s.category,
+                        style: const TextStyle(
+                            fontSize: 10, fontWeight: FontWeight.w600,
+                            color: Color(0xFF92400E)),
+                      ),
+                    ),
+                  ],
+                ],
               ),
-          ])),
-          if (isLow)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFEF2F2),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: const Color(0xFFFFCACA)),
-              ),
-              child: const Text('⚠ कम स्टॉक',
-                  style: TextStyle(
-                      fontSize: 11, fontWeight: FontWeight.w700,
-                      color: AppColors.danger)),
             ),
-        ]),
-        const SizedBox(height: 10),
-
-        // Price hero + stock
-        Row(crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-          Text(
-            '₹${s.sellingPrice % 1 == 0 ? s.sellingPrice.toInt() : s.sellingPrice.toStringAsFixed(2)}',
-            style: const TextStyle(
-                fontSize: 22, fontWeight: FontWeight.w800,
-                color: AppColors.textPrimary, letterSpacing: -0.5),
-          ),
-          const Text('  ·  ',
-              style: TextStyle(color: AppColors.border, fontSize: 16)),
-          Text(
-            '${s.currentStock % 1 == 0 ? s.currentStock.toInt() : s.currentStock} ${s.unit}',
-            style: TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w600,
-                color: isLow ? AppColors.danger : AppColors.textSecondary),
-          ),
-        ]),
-
-        // Aliases
-        if (s.aliases.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 4, runSpacing: 4,
-            children: s.aliases.map((a) => Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Text(a,
-                  style: const TextStyle(
-                      fontSize: 11, fontWeight: FontWeight.w500,
-                      color: AppColors.textSecondary)),
-            )).toList(),
-          ),
-        ],
-      ]),
+            const SizedBox(width: 12),
+            // Right: price · stock unit + low badge
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text('₹$priceStr',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: 14,
+                        color: AppColors.textPrimary)),
+                Text('  ·  ',
+                    style: TextStyle(color: AppColors.border, fontSize: 13)),
+                Text(
+                  '$stockStr ${s.unit}',
+                  style: TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w500,
+                      color: isLow ? AppColors.danger : AppColors.textSecondary),
+                ),
+                if (isLow) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.dangerLight,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text('कम',
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
+                            color: AppColors.danger)),
+                  ),
+                ],
+                const SizedBox(width: 4),
+                const Icon(Icons.chevron_right, size: 16, color: AppColors.textMuted),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
+  }
+
+  void _openItemDetail(StockItem s) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => StockItemDetailScreen(item: s)),
+    ).then((_) => _load());
   }
 
   Widget _chip(String label, bool active, VoidCallback onTap) {

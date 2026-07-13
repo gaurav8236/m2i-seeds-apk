@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
 import 'screens/login_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'services/auth_service.dart';
 import 'supabase_config.dart';
 import 'theme.dart';
@@ -37,9 +38,21 @@ class SmartDukanApp extends StatelessWidget {
   }
 }
 
-// Listens to auth state — routes to LoginScreen or AppShell automatically.
-class AuthGate extends StatelessWidget {
+// Listens to auth state — routes to LoginScreen, Onboarding, or AppShell.
+class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  bool? _seenOnboarding;
+
+  Future<void> _checkOnboarding() async {
+    final seen = await AuthService.hasSeenOnboarding();
+    if (mounted) setState(() => _seenOnboarding = seen);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,11 +60,24 @@ class AuthGate extends StatelessWidget {
       stream: AuthService.authStateChanges,
       builder: (context, snapshot) {
         final session = AuthService.currentSession;
-        if (session != null) {
-          AuthService.ensureUserRow(); // guarantee users row exists
-          return const AppShell();
+        if (session == null) return const LoginScreen();
+
+        AuthService.ensureUserRow();
+
+        if (_seenOnboarding == null) {
+          _checkOnboarding();
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
-        return const LoginScreen();
+
+        if (!_seenOnboarding!) {
+          return OnboardingScreen(
+            onDone: () => setState(() => _seenOnboarding = true),
+          );
+        }
+
+        return const AppShell();
       },
     );
   }

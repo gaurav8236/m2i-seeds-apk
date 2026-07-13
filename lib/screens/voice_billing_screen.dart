@@ -4,10 +4,12 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:printing/printing.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../models/models.dart';
+import '../services/draft_service.dart';
 import '../services/supabase_service.dart';
 import '../services/voice_service.dart';
 import '../theme.dart';
 import 'past_bills_screen.dart';
+import 'recording_screen.dart';
 
 enum BillingView { input, settlement, success }
 
@@ -31,37 +33,96 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
   bool _isCredit = false;
   String _customerName = '';
   double _finalTotal = 0;
+  String _currentDraftId = DateTime.now().millisecondsSinceEpoch.toString();
+  List<DraftBill> _drafts = [];
 
   // Settlement
   final _customerController = TextEditingController();
   bool _showCustomerSuggestions = false;
 
-  // Waveform animation
-  late AnimationController _waveController;
+  // Voice AI animation — 3 staggered pulse rings + mic breathe
+  late List<AnimationController> _ringControllers;
+  late AnimationController _breatheController;
 
   @override
   void initState() {
     super.initState();
-    _waveController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800))
-      ..repeat(reverse: true);
+    // 3 rings staggered 500ms apart — pulse outward and fade
+    _ringControllers = List.generate(3, (i) {
+      final ctrl = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 1800),
+      );
+      Future.delayed(Duration(milliseconds: i * 600), () {
+        if (mounted) ctrl.repeat();
+      });
+      return ctrl;
+    });
+    // Mic button breathes gently while recording
+    _breatheController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
     _loadData();
   }
 
   @override
   void dispose() {
-    _waveController.dispose();
+    for (final c in _ringControllers) c.dispose();
+    _breatheController.dispose();
     _customerController.dispose();
     VoiceService.dispose();
     super.dispose();
   }
 
   Future<void> _loadData() async {
-    final stock = await SupabaseService.fetchStock();
-    final names = await SupabaseService.fetchCustomerNames();
+    final results = await Future.wait([
+      SupabaseService.fetchStock(),
+      SupabaseService.fetchCustomerNames(),
+      DraftService.loadDrafts(),
+    ]);
     setState(() {
-      _stockList = stock;
-      _customerNames = names;
+      _stockList = results[0] as List<StockItem>;
+      _customerNames = results[1] as List<String>;
+      _drafts = results[2] as List<DraftBill>;
     });
+  }
+
+  Future<void> _autoSaveDraft() async {
+    if (_billItems.isEmpty) return;
+    final draft = DraftBill(
+      id: _currentDraftId,
+      items: List.from(_billItems),
+      discount: _discount,
+      customerName: _customerName,
+      savedAt: DateTime.now(),
+    );
+    await DraftService.saveDraft(draft);
+  }
+
+  void _resumeDraft(DraftBill draft) {
+    setState(() {
+      _currentDraftId = draft.id;
+      _billItems = List.from(draft.items);
+      _discount = draft.discount;
+      _customerName = draft.customerName;
+      _customerController.text = draft.customerName;
+      _view = BillingView.input;
+    });
+  }
+
+  Future<void> _deleteDraft(String id) async {
+    await DraftService.deleteDraft(id);
+    final drafts = await DraftService.loadDrafts();
+    setState(() => _drafts = drafts);
+  }
+
+  String _timeSince(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 1) return 'अभी';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} मिनट पहले';
+    if (diff.inHours < 24) return '${diff.inHours} घंटे पहले';
+    return '${diff.inDays} दिन पहले';
   }
 
   double get _subTotal => _billItems.fold(0, (s, i) => s + i.itemTotal);
@@ -228,10 +289,12 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
         isCredit: _isCredit,
       );
 
+      await DraftService.deleteDraft(_currentDraftId);
       setState(() {
         _finalTotal = finalTotal;
         _view = BillingView.success;
       });
+      _currentDraftId = DateTime.now().millisecondsSinceEpoch.toString();
       await _loadData();
     } catch (e) {
       _showSnack('बिल सहेजने में त्रुटि: $e');
@@ -298,6 +361,71 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
     });
   }
 
+  Future<void> _openRecordingScreen() async {
+    final results = await Navigator.push<List<BillItem>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RecordingScreen(stockList: _stockList),
+      ),
+    );
+    if (results != null && results.isNotEmpty) {
+      setState(() => _billItems = results);
+    }
+  }
+
+  Widget _draftCard(DraftBill draft) {
+    final subTotal = draft.items.fold(0.0, (s, i) => s + i.itemTotal);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.primary.withOpacity(0.4), width: 1.5,
+            style: BorderStyle.solid),
+      ),
+      child: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+          child: Row(children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.primaryLight,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Text('ड्राफ़्ट',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
+                      color: AppColors.primary)),
+            ),
+            const SizedBox(width: 8),
+            Text(_timeSince(draft.savedAt),
+                style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+            const Spacer(),
+            GestureDetector(
+              onTap: () => _deleteDraft(draft.id),
+              child: const Icon(Icons.close, size: 16, color: AppColors.textMuted),
+            ),
+          ]),
+        ),
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          title: Text(
+            draft.customerName.isNotEmpty ? draft.customerName : 'ग्राहक नहीं चुना',
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+          ),
+          subtitle: Text('${draft.items.length} आइटम · ₹${subTotal.toStringAsFixed(0)}',
+              style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+          trailing: TextButton(
+            onPressed: () => _resumeDraft(draft),
+            child: const Text('जारी रखें →',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13,
+                    color: AppColors.primary)),
+          ),
+        ),
+      ]),
+    );
+  }
+
   void _showSnack(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
@@ -314,6 +442,16 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
   // ── VIEW 1: INPUT ───────────────────────────────────────────────────────────
 
   Widget _buildInput() {
+    return WillPopScope(
+      onWillPop: () async {
+        await _autoSaveDraft();
+        return true;
+      },
+      child: _buildInputScaffold(),
+    );
+  }
+
+  Widget _buildInputScaffold() {
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: Column(
@@ -398,6 +536,11 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
                 // Mic Zone
                 _micZone(),
                 const SizedBox(height: 16),
+                // Draft cards
+                if (_drafts.isNotEmpty && _billItems.isEmpty) ...[
+                  ..._drafts.map((d) => _draftCard(d)),
+                  const SizedBox(height: 8),
+                ],
                 // Bill table
                 if (_billItems.isNotEmpty) _billTable(),
                 const SizedBox(height: 80),
@@ -407,9 +550,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
         ],
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-      bottomSheet: (_billItems.isNotEmpty)
-          ? _settleBar()
-          : null,
+      bottomSheet: (_billItems.isNotEmpty) ? _settleBar() : null,
     );
   }
 
@@ -424,47 +565,64 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
       ),
       child: Column(
         children: [
-          // Mic button
-          GestureDetector(
-            onTap: _isProcessing ? null : (_isRecording ? _stopRecording : _startRecording),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 88, height: 88,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: _isRecording
-                    ? const LinearGradient(
-                        colors: [Color(0xFFDC2626), Color(0xFFEF4444)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      )
-                    : primaryGradient,
-                boxShadow: [
-                  BoxShadow(
-                    color: (_isRecording ? AppColors.danger : AppColors.primary).withOpacity(0.35),
-                    blurRadius: 24,
-                    offset: const Offset(0, 8),
+          // Mic button with pulsing rings
+          SizedBox(
+            width: 200,
+            height: 200,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // 3 staggered pulse rings (only when recording)
+                if (_isRecording)
+                  ..._ringControllers.map((ctrl) => _pulseRing(ctrl)),
+
+                // Mic button — opens full-screen recording
+                GestureDetector(
+                  onTap: _isProcessing ? null : _openRecordingScreen,
+                  child: AnimatedBuilder(
+                    animation: _breatheController,
+                    builder: (_, child) {
+                      final scale = _isRecording
+                          ? 1.0 + _breatheController.value * 0.07
+                          : 1.0;
+                      return Transform.scale(
+                        scale: scale,
+                        child: child,
+                      );
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      width: 88, height: 88,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: _isRecording
+                            ? const LinearGradient(
+                                colors: [Color(0xFFDC2626), Color(0xFFEF4444)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              )
+                            : primaryGradient,
+                        boxShadow: [
+                          BoxShadow(
+                            color: (_isRecording ? AppColors.danger : AppColors.primary)
+                                .withOpacity(_isRecording ? 0.55 : 0.35),
+                            blurRadius: _isRecording ? 32 : 24,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: _isProcessing
+                          ? const Padding(
+                              padding: EdgeInsets.all(24),
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+                            )
+                          : const Icon(Icons.mic, color: Colors.white, size: 34),
+                    ),
                   ),
-                ],
-              ),
-              child: _isProcessing
-                  ? const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
-                    )
-                  : const Icon(Icons.mic, color: Colors.white, size: 34),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 16),
-
-          // Waveform
-          if (_isRecording)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(8, (i) => _waveBar(i)),
-            ),
-
-          const SizedBox(height: 8),
 
           // Status text
           if (_isProcessing)
@@ -526,18 +684,26 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
     );
   }
 
-  Widget _waveBar(int i) {
+  Widget _pulseRing(AnimationController ctrl) {
     return AnimatedBuilder(
-      animation: _waveController,
+      animation: ctrl,
       builder: (_, __) {
-        final height = 8 + (24 * (0.5 + 0.5 * (_waveController.value + i * 0.12).clamp(0, 1)));
-        return Container(
-          width: 3,
-          height: height,
-          margin: const EdgeInsets.symmetric(horizontal: 2),
-          decoration: BoxDecoration(
-            color: AppColors.danger,
-            borderRadius: BorderRadius.circular(2),
+        final t = ctrl.value;
+        // Ease out: fast expand, slow fade
+        final scale = 0.9 + t * 1.35;
+        final opacity = (1 - t) * (_isRecording ? 0.4 : 0.0);
+        return Transform.scale(
+          scale: scale,
+          child: Container(
+            width: 88,
+            height: 88,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: AppColors.danger.withOpacity(opacity),
+                width: 2.5,
+              ),
+            ),
           ),
         );
       },
