@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class StockItem {
   final String id;
   final double currentStock;
@@ -115,7 +117,13 @@ class Bill {
       totalAmount: (map['total_amount'] as num?)?.toDouble() ?? 0,
       discountAmount: (map['discount_amount'] as num?)?.toDouble(),
       isCredit: map['is_credit'] == true,
-      billDetails: List<Map<String, dynamic>>.from(map['bill_details'] ?? []),
+      billDetails: () {
+        final raw = map['bill_details'];
+        if (raw is String) {
+          return List<Map<String, dynamic>>.from(jsonDecode(raw) as List);
+        }
+        return List<Map<String, dynamic>>.from(raw ?? []);
+      }(),
     );
   }
 }

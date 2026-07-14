@@ -5,7 +5,8 @@ import '../theme.dart';
 import 'stock_item_detail_screen.dart';
 
 class InventoryScreen extends StatefulWidget {
-  const InventoryScreen({super.key});
+  final void Function(VoidCallback) onRegisterReload;
+  const InventoryScreen({super.key, required this.onRegisterReload});
 
   @override
   State<InventoryScreen> createState() => _InventoryScreenState();
@@ -44,6 +45,7 @@ class _InventoryScreenState extends State<InventoryScreen>
   @override
   void initState() {
     super.initState();
+    widget.onRegisterReload(_load);
     _load();
     _nameCtrl.addListener(_onNameChanged);
   }
@@ -671,82 +673,81 @@ class _InventoryScreenState extends State<InventoryScreen>
     return GestureDetector(
       onTap: () => _openItemDetail(s),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
+        margin: const EdgeInsets.only(bottom: 6),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(color: isLow ? const Color(0xFFFFCACA) : AppColors.border),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Left: name + category badge
             Expanded(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Flexible(
-                    child: Text(
-                      s.itemName,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w600, fontSize: 14,
-                          color: AppColors.textPrimary),
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                  // Row 1 — name
+                  Text(
+                    s.itemName,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w400, fontSize: 14,
+                        color: AppColors.textPrimary),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  if (s.category.isNotEmpty) ...[
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFEF3C7),
-                        borderRadius: BorderRadius.circular(20),
+                  const SizedBox(height: 4),
+                  // Row 2 — category · price · stock
+                  Row(
+                    children: [
+                      if (s.category.isNotEmpty) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF3C7),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            s.category,
+                            style: const TextStyle(
+                                fontSize: 10, fontWeight: FontWeight.w500,
+                                color: Color(0xFF92400E)),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Text('₹$priceStr',
+                          style: const TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w600,
+                              color: AppColors.textSecondary)),
+                      const SizedBox(width: 6),
+                      Text('·',
+                          style: TextStyle(fontSize: 11, color: AppColors.border)),
+                      const SizedBox(width: 6),
+                      Text(
+                        '$stockStr ${s.unit}',
+                        style: TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.w400,
+                            color: isLow ? AppColors.danger : AppColors.textMuted),
                       ),
-                      child: Text(
-                        s.category,
-                        style: const TextStyle(
-                            fontSize: 10, fontWeight: FontWeight.w600,
-                            color: Color(0xFF92400E)),
-                      ),
-                    ),
-                  ],
+                      if (isLow) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: AppColors.dangerLight,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text('कम',
+                              style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600,
+                                  color: AppColors.danger)),
+                        ),
+                      ],
+                    ],
+                  ),
                 ],
               ),
             ),
-            const SizedBox(width: 12),
-            // Right: price · stock unit + low badge
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Text('₹$priceStr',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w700, fontSize: 14,
-                        color: AppColors.textPrimary)),
-                Text('  ·  ',
-                    style: TextStyle(color: AppColors.border, fontSize: 13)),
-                Text(
-                  '$stockStr ${s.unit}',
-                  style: TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w500,
-                      color: isLow ? AppColors.danger : AppColors.textSecondary),
-                ),
-                if (isLow) ...[
-                  const SizedBox(width: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: AppColors.dangerLight,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Text('कम',
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
-                            color: AppColors.danger)),
-                  ),
-                ],
-                const SizedBox(width: 4),
-                const Icon(Icons.chevron_right, size: 16, color: AppColors.textMuted),
-              ],
-            ),
+            const Icon(Icons.chevron_right, size: 16, color: AppColors.border),
           ],
         ),
       ),

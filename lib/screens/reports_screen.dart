@@ -6,7 +6,8 @@ import '../theme.dart';
 import 'add_customer_screen.dart';
 
 class ReportsScreen extends StatefulWidget {
-  const ReportsScreen({super.key});
+  final void Function(VoidCallback) onRegisterReload;
+  const ReportsScreen({super.key, required this.onRegisterReload});
 
   @override
   State<ReportsScreen> createState() => _ReportsScreenState();
@@ -32,6 +33,7 @@ class _ReportsScreenState extends State<ReportsScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    widget.onRegisterReload(_load);
     _load();
   }
 
@@ -48,8 +50,9 @@ class _ReportsScreenState extends State<ReportsScreen>
         return DateTimeRange(
             start: DateTime(now.year, now.month, now.day), end: now);
       case StatsPeriod.thisWeek:
+        final monday = now.subtract(Duration(days: now.weekday - 1));
         return DateTimeRange(
-            start: now.subtract(Duration(days: now.weekday - 1)), end: now);
+            start: DateTime(monday.year, monday.month, monday.day), end: now);
       case StatsPeriod.thisMonth:
         return DateTimeRange(
             start: DateTime(now.year, now.month, 1), end: now);
@@ -287,32 +290,32 @@ class _ReportsScreenState extends State<ReportsScreen>
     return RefreshIndicator(
       onRefresh: _load,
       child: Column(children: [
-        // Add customer button
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('${_customers.length} ग्राहक',
-                  style: const TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.w600,
-                      color: AppColors.textMuted)),
-              TextButton.icon(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => const AddCustomerScreen()),
-                ).then((_) => _load()),
-                icon: const Icon(Icons.person_add_outlined,
-                    size: 16, color: AppColors.primary),
-                label: const Text('+ नया',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w700, fontSize: 13,
-                        color: AppColors.primary)),
-              ),
-            ],
+        if (!_loading && _customers.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('${_customers.length} ग्राहक',
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w600,
+                        color: AppColors.textMuted)),
+                TextButton.icon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const AddCustomerScreen()),
+                  ).then((_) => _load()),
+                  icon: const Icon(Icons.person_add_outlined,
+                      size: 16, color: AppColors.primary),
+                  label: const Text('+ नया',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 13,
+                          color: AppColors.primary)),
+                ),
+              ],
+            ),
           ),
-        ),
 
         if (_loading)
           const Expanded(child: Center(child: CircularProgressIndicator()))
@@ -323,20 +326,30 @@ class _ReportsScreenState extends State<ReportsScreen>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Icon(Icons.people_outline,
-                      size: 48, color: AppColors.border),
-                  const SizedBox(height: 12),
+                      size: 56, color: AppColors.border),
+                  const SizedBox(height: 14),
                   const Text('कोई ग्राहक नहीं',
                       style: TextStyle(
-                          color: AppColors.textMuted,
+                          fontSize: 15, color: AppColors.textMuted,
                           fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  TextButton(
+                  const SizedBox(height: 20),
+                  ElevatedButton.icon(
                     onPressed: () => Navigator.push(
                       context,
                       MaterialPageRoute(
                           builder: (_) => const AddCustomerScreen()),
                     ).then((_) => _load()),
-                    child: const Text('+ नया ग्राहक जोड़ें'),
+                    icon: const Icon(Icons.person_add_outlined, size: 18),
+                    label: const Text('+ नया ग्राहक जोड़ें',
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
                   ),
                 ],
               ),
@@ -486,20 +499,12 @@ class _ReportsScreenState extends State<ReportsScreen>
               ),
             )
           else
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: bills.length,
-                separatorBuilder: (_, __) =>
-                    const Divider(height: 1, color: AppColors.border),
-                itemBuilder: (_, i) => _billRow(bills[i]),
-              ),
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: EdgeInsets.zero,
+              itemCount: bills.length,
+              itemBuilder: (_, i) => _billCard(bills[i]),
             ),
         ],
       ),
@@ -562,45 +567,195 @@ class _ReportsScreenState extends State<ReportsScreen>
     );
   }
 
-  Widget _billRow(Bill bill) {
-    return ListTile(
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-      leading: Container(
-        width: 38, height: 38,
+  Widget _billCard(Bill bill) {
+    final color = bill.isCredit ? AppColors.danger : AppColors.success;
+    final bgColor = bill.isCredit ? AppColors.dangerLight : AppColors.successLight;
+    final icon = bill.isCredit ? Icons.credit_card_outlined : Icons.payments_outlined;
+
+    return GestureDetector(
+      onTap: () => _showBillDetail(bill),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: bill.isCredit ? AppColors.dangerLight : AppColors.successLight,
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
         ),
-        child: Icon(
-          bill.isCredit
-              ? Icons.credit_card_outlined
-              : Icons.payments_outlined,
-          size: 18,
-          color: bill.isCredit ? AppColors.danger : AppColors.success,
+        child: Row(children: [
+          Container(
+            width: 40, height: 40,
+            decoration: BoxDecoration(
+              color: bgColor,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(bill.customerName ?? 'नकद ग्राहक',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 13,
+                      color: AppColors.textPrimary),
+                  overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 3),
+              Text(
+                '${DateFormat('dd MMM, hh:mm a').format(bill.createdAt)} · ${bill.billDetails.length} आइटम',
+                style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+              ),
+            ]),
+          ),
+          const SizedBox(width: 8),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Text(_fmt(bill.totalAmount),
+                style: TextStyle(
+                    fontWeight: FontWeight.w800, fontSize: 14, color: color)),
+            Text(bill.isCredit ? 'उधार' : 'नकद',
+                style: TextStyle(fontSize: 10, color: color)),
+          ]),
+          const SizedBox(width: 4),
+          const Icon(Icons.chevron_right, size: 16, color: AppColors.textMuted),
+        ]),
+      ),
+    );
+  }
+
+  void _showBillDetail(Bill bill) {
+    final color = bill.isCredit ? AppColors.danger : AppColors.success;
+    final bgColor = bill.isCredit ? AppColors.dangerLight : AppColors.successLight;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.4,
+        maxChildSize: 0.9,
+        builder: (_, scrollCtrl) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(children: [
+            // Handle
+            Container(
+              margin: const EdgeInsets.only(top: 10, bottom: 6),
+              width: 36, height: 4,
+              decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2)),
+            ),
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: Row(children: [
+                Container(
+                  width: 40, height: 40,
+                  decoration: BoxDecoration(
+                      color: bgColor, borderRadius: BorderRadius.circular(10)),
+                  child: Icon(
+                    bill.isCredit ? Icons.credit_card_outlined : Icons.payments_outlined,
+                    color: color, size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(bill.customerName ?? 'नकद ग्राहक',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 15,
+                            color: AppColors.textPrimary)),
+                    Text(DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt),
+                        style: const TextStyle(
+                            fontSize: 11, color: AppColors.textMuted)),
+                  ]),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                      color: bgColor, borderRadius: BorderRadius.circular(20)),
+                  child: Text(bill.isCredit ? 'उधार' : 'नकद',
+                      style: TextStyle(
+                          fontSize: 11, fontWeight: FontWeight.w700, color: color)),
+                ),
+              ]),
+            ),
+            const Divider(height: 1, color: AppColors.border),
+            // Items list
+            Expanded(
+              child: ListView(
+                controller: scrollCtrl,
+                padding: const EdgeInsets.all(16),
+                children: [
+                  const Text('आइटम',
+                      style: TextStyle(
+                          fontSize: 11, fontWeight: FontWeight.w700,
+                          color: AppColors.textMuted, letterSpacing: 0.5)),
+                  const SizedBox(height: 8),
+                  ...bill.billDetails.map((item) {
+                    final name = item['item_name']?.toString() ?? '';
+                    final qty = (item['quantity_billed'] as num?)?.toDouble() ?? 0;
+                    final price = (item['price_per_unit'] as num?)?.toDouble() ?? 0;
+                    final total = (item['item_total'] as num?)?.toDouble() ?? 0;
+                    final unit = item['unit']?.toString() ?? '';
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Row(children: [
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(name,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600, fontSize: 13,
+                                    color: AppColors.textPrimary)),
+                            Text('$qty $unit × ₹${price.toStringAsFixed(0)}',
+                                style: const TextStyle(
+                                    fontSize: 11, color: AppColors.textMuted)),
+                          ]),
+                        ),
+                        Text('₹${total.toStringAsFixed(0)}',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w700, fontSize: 13,
+                                color: AppColors.textPrimary)),
+                      ]),
+                    );
+                  }),
+                  const Divider(color: AppColors.border),
+                  if (bill.discountAmount != null && bill.discountAmount! > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('छूट',
+                              style: TextStyle(
+                                  fontSize: 13, color: AppColors.textMuted)),
+                          Text('- ₹${bill.discountAmount!.toStringAsFixed(0)}',
+                              style: const TextStyle(
+                                  fontSize: 13, color: AppColors.danger,
+                                  fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('कुल',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700, fontSize: 15,
+                              color: AppColors.textPrimary)),
+                      Text(_fmt(bill.totalAmount),
+                          style: TextStyle(
+                              fontWeight: FontWeight.w800, fontSize: 18,
+                              color: color, letterSpacing: -0.5)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ]),
         ),
-      ),
-      title: Text(bill.customerName ?? 'नकद ग्राहक',
-          style: const TextStyle(
-              fontWeight: FontWeight.w600, fontSize: 13),
-          overflow: TextOverflow.ellipsis),
-      subtitle: Text(
-        '${DateFormat('dd MMM hh:mm a').format(bill.createdAt)} · ${bill.billDetails.length} आइटम',
-        style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
-      ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(_fmt(bill.totalAmount),
-              style: TextStyle(
-                  fontWeight: FontWeight.w800, fontSize: 14,
-                  color: bill.isCredit ? AppColors.danger : AppColors.success)),
-          Text(bill.isCredit ? 'उधार' : 'नकद',
-              style: TextStyle(
-                  fontSize: 10,
-                  color: bill.isCredit ? AppColors.danger : AppColors.success)),
-        ],
       ),
     );
   }
