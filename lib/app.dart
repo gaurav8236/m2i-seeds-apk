@@ -15,7 +15,20 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _currentIndex = 0;
 
-  void _changeTab(int index) => setState(() => _currentIndex = index);
+  // Each screen registers its reload fn here
+  final Map<int, VoidCallback> _reloaders = {};
+
+  void _registerReload(int tabIndex, VoidCallback fn) {
+    _reloaders[tabIndex] = fn;
+  }
+
+  void _changeTab(int index) {
+    setState(() => _currentIndex = index);
+    // Refresh the screen we're switching TO (skip VoiceBillingScreen tab 1)
+    if (index != 1) {
+      _reloaders[index]?.call();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,10 +36,17 @@ class _AppShellState extends State<AppShell> {
       body: IndexedStack(
         index: _currentIndex,
         children: [
-          HomeScreen(onTabChange: _changeTab),
+          HomeScreen(
+            onTabChange: _changeTab,
+            onRegisterReload: (fn) => _registerReload(0, fn),
+          ),
           const VoiceBillingScreen(),
-          const InventoryScreen(),
-          const ReportsScreen(),
+          InventoryScreen(
+            onRegisterReload: (fn) => _registerReload(2, fn),
+          ),
+          ReportsScreen(
+            onRegisterReload: (fn) => _registerReload(3, fn),
+          ),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(

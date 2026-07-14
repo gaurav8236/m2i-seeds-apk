@@ -9,7 +9,8 @@ import 'profile_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final void Function(int) onTabChange;
-  const HomeScreen({super.key, required this.onTabChange});
+  final void Function(VoidCallback) onRegisterReload;
+  const HomeScreen({super.key, required this.onTabChange, required this.onRegisterReload});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -27,6 +28,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    widget.onRegisterReload(_load);
     _load();
   }
 
@@ -37,8 +39,9 @@ class _HomeScreenState extends State<HomeScreen> {
         return DateTimeRange(
             start: DateTime(now.year, now.month, now.day), end: now);
       case StatsPeriod.thisWeek:
+        final monday = now.subtract(Duration(days: now.weekday - 1));
         return DateTimeRange(
-            start: now.subtract(Duration(days: now.weekday - 1)), end: now);
+            start: DateTime(monday.year, monday.month, monday.day), end: now);
       case StatsPeriod.thisMonth:
         return DateTimeRange(
             start: DateTime(now.year, now.month, 1), end: now);
@@ -211,12 +214,16 @@ class _HomeScreenState extends State<HomeScreen> {
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
                   // ── Low stock alert ──────────────────────────────────
-                  if (!_loading && _lowStockCount > 0)
+                  if (!_loading && _lowStockCount > 0) ...[
                     _lowStockBanner(),
+                    const SizedBox(height: 12),
+                  ],
 
                   // ── बकाया card (always-current, not period-filtered) ──
-                  _bakayaCard(),
-                  const SizedBox(height: 4),
+                  if (!_loading && _outstanding > 0) ...[
+                    _bakayaCard(),
+                    const SizedBox(height: 12),
+                  ],
 
                   // ── New Bill CTA ─────────────────────────────────────
                   _newBillCTA(context),
@@ -415,11 +422,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _lowStockBanner() {
     return GestureDetector(
-      onTap: () {
-        // navigate to inventory tab
-      },
+      onTap: () => widget.onTabChange(2),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
           color: AppColors.warningLight,

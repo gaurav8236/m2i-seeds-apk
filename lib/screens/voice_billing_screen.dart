@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:printing/printing.dart';
+import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../models/models.dart';
 import '../services/draft_service.dart';
@@ -304,47 +306,204 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
   }
 
   Future<void> _downloadPdf() async {
+    // Load fonts (Noto Sans supports ₹, Latin, and Devanagari)
+    final regular = await PdfGoogleFonts.notoSansRegular();
+    final bold = await PdfGoogleFonts.notoSansBold();
+    final devaRegular = await PdfGoogleFonts.notoSansDevanagariRegular();
+    final devaBold = await PdfGoogleFonts.notoSansDevanagariBold();
+
+    const PdfColor red = PdfColor.fromInt(0xFFDC2626);
+    const PdfColor grey = PdfColor.fromInt(0xFF6B7280);
+    const PdfColor black = PdfColors.black;
+
+    // 80mm thermal receipt width (226.77 pt)
+    const double pageWidth = 80 * PdfPageFormat.mm;
+
+    // Calculate dynamic height based on content
+    const double headerH   = 68.0;
+    final double infoH     = 44.0 + (_customerName.isNotEmpty ? 16.0 : 0) + (_isCredit ? 18.0 : 0);
+    const double tblHeadH  = 28.0;
+    final double itemsH    = _billItems.length * 24.0;
+    final double summaryH  = 50.0 + (_discount > 0 ? 18.0 : 0);
+    const double footerH   = 44.0;
+    final double totalH    = headerH + infoH + tblHeadH + itemsH + summaryH + footerH;
+
+    final pageFormat = PdfPageFormat(pageWidth, totalH, marginAll: 14);
+
+    // Dashed divider
+    pw.Widget dashedLine() => pw.Container(
+      margin: const pw.EdgeInsets.symmetric(vertical: 5),
+      decoration: const pw.BoxDecoration(
+        border: pw.Border(
+          bottom: pw.BorderSide(
+            width: 0.6,
+            style: pw.BorderStyle.dashed,
+            color: grey,
+          ),
+        ),
+      ),
+    );
+
+    pw.TextStyle sty({
+      required pw.Font font,
+      double size = 10,
+      PdfColor? color,
+    }) => pw.TextStyle(font: font, fontSize: size, color: color);
+
     final pdf = pw.Document();
+
     pdf.addPage(pw.Page(
+      pageFormat: pageFormat,
       build: (ctx) => pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
         children: [
-          pw.Center(child: pw.Text('SmartDukan',
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 18))),
-          pw.Center(child: pw.Text('दुकानदार सहायक', style: const pw.TextStyle(fontSize: 11))),
+
+          // ── HEADER ──────────────────────────────────────────────────
+          pw.Center(
+            child: pw.Text('SmartDukan',
+                style: sty(font: bold, size: 18, color: black)),
+          ),
+          pw.SizedBox(height: 3),
+          pw.Center(
+            child: pw.Text('दुकानदार सहायक',
+                style: sty(font: devaRegular, size: 10, color: grey)),
+          ),
           pw.SizedBox(height: 10),
-          pw.Divider(),
-          pw.Text('Date: ${DateTime.now().toString().split('.').first}'),
-          if (_customerName.isNotEmpty) pw.Text('Customer: $_customerName'),
-          pw.Divider(),
-          pw.Table(
-            border: pw.TableBorder.all(width: 0.5),
-            children: [
-              pw.TableRow(children: [
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('Item', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('Unit', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('Rate', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('Qty', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('Total', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+          dashedLine(),
+
+          // ── BILL INFO ────────────────────────────────────────────────
+          pw.SizedBox(height: 6),
+          pw.RichText(
+            text: pw.TextSpan(children: [
+              pw.TextSpan(text: 'दिनांक: ',
+                  style: sty(font: devaBold, size: 11)),
+              pw.TextSpan(text: DateFormat('d/M/yyyy').format(DateTime.now()),
+                  style: sty(font: regular, size: 11)),
+            ]),
+          ),
+          if (_customerName.isNotEmpty) ...[
+            pw.SizedBox(height: 4),
+            pw.RichText(
+              text: pw.TextSpan(children: [
+                pw.TextSpan(text: 'ग्राहक: ',
+                    style: sty(font: devaBold, size: 11)),
+                pw.TextSpan(text: _customerName,
+                    style: sty(font: regular, size: 11)),
               ]),
-              ..._billItems.map((item) => pw.TableRow(children: [
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text(item.itemName)),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text(_getUnit(item))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('₹${item.pricePerUnit}')),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('${item.quantity}')),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('₹${item.itemTotal}')),
-              ])),
+            ),
+          ],
+          if (_isCredit) ...[
+            pw.SizedBox(height: 4),
+            pw.Text('** उधार बिल (CREDIT BILL) **',
+                style: sty(font: devaBold, size: 11, color: red)),
+          ],
+          pw.SizedBox(height: 10),
+
+          // ── TABLE HEADER — order: आइटम | मात्रा | इकाई | दर | कुल ──
+          pw.Row(children: [
+            pw.Expanded(flex: 5,
+                child: pw.Text('आइटम', style: sty(font: devaBold, size: 10))),
+            pw.SizedBox(width: 32,
+                child: pw.Text('मात्रा', textAlign: pw.TextAlign.center,
+                    style: sty(font: devaBold, size: 10))),
+            pw.SizedBox(width: 30,
+                child: pw.Text('इकाई', textAlign: pw.TextAlign.center,
+                    style: sty(font: devaBold, size: 10))),
+            pw.SizedBox(width: 30,
+                child: pw.Text('दर', textAlign: pw.TextAlign.right,
+                    style: sty(font: devaBold, size: 10))),
+            pw.SizedBox(width: 34,
+                child: pw.Text('कुल', textAlign: pw.TextAlign.right,
+                    style: sty(font: devaBold, size: 10))),
+          ]),
+          pw.SizedBox(height: 4),
+          pw.Divider(thickness: 0.8, color: black),
+
+          // ── ITEMS ────────────────────────────────────────────────────
+          ..._billItems.map((item) => pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(vertical: 5),
+            child: pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Expanded(flex: 5,
+                    child: pw.Text(item.itemName,
+                        style: sty(font: regular, size: 10))),
+                pw.SizedBox(width: 32,
+                    child: pw.Text(
+                        item.quantity % 1 == 0
+                            ? item.quantity.toInt().toString()
+                            : item.quantity.toStringAsFixed(1),
+                        textAlign: pw.TextAlign.center,
+                        style: sty(font: regular, size: 10))),
+                pw.SizedBox(width: 30,
+                    child: pw.Text(_getUnit(item),
+                        textAlign: pw.TextAlign.center,
+                        style: sty(font: regular, size: 10))),
+                pw.SizedBox(width: 30,
+                    child: pw.Text(
+                        '₹${item.pricePerUnit % 1 == 0 ? item.pricePerUnit.toInt() : item.pricePerUnit.toStringAsFixed(1)}',
+                        textAlign: pw.TextAlign.right,
+                        style: sty(font: regular, size: 10))),
+                pw.SizedBox(width: 34,
+                    child: pw.Text(
+                        '₹${item.itemTotal % 1 == 0 ? item.itemTotal.toInt() : item.itemTotal.toStringAsFixed(0)}',
+                        textAlign: pw.TextAlign.right,
+                        style: sty(font: bold, size: 10))),
+              ],
+            ),
+          )),
+
+          pw.SizedBox(height: 4),
+          dashedLine(),
+
+          // ── SUMMARY ──────────────────────────────────────────────────
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('उप-कुल', style: sty(font: devaRegular, size: 11)),
+              pw.Text('₹${_subTotal.toStringAsFixed(2)}',
+                  style: sty(font: regular, size: 11)),
             ],
           ),
-          pw.SizedBox(height: 8),
-          if (_discount > 0) pw.Text('Discount: -₹${_discount.toStringAsFixed(2)}'),
-          pw.Text('Total: ₹${_finalTotal.toStringAsFixed(2)}',
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14)),
+          if (_discount > 0) ...[
+            pw.SizedBox(height: 4),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('छूट', style: sty(font: devaBold, size: 11, color: red)),
+                pw.Text('-₹${_discount.toStringAsFixed(2)}',
+                    style: sty(font: bold, size: 11, color: red)),
+              ],
+            ),
+          ],
+          dashedLine(),
+
+          // ── TOTAL ────────────────────────────────────────────────────
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('कुल राशि', style: sty(font: devaBold, size: 13)),
+              pw.Text('₹${_grandTotal.toStringAsFixed(2)}',
+                  style: sty(font: bold, size: 13)),
+            ],
+          ),
+
           pw.SizedBox(height: 16),
-          pw.Center(child: pw.Text('धन्यवाद! फिर पधारें।')),
+
+          // ── FOOTER ───────────────────────────────────────────────────
+          pw.Center(
+            child: pw.Text('धन्यवाद! फिर पधारें।',
+                style: sty(font: devaRegular, size: 10, color: grey)),
+          ),
+          pw.SizedBox(height: 2),
+          pw.Center(
+            child: pw.Text('(Thank you for shopping)',
+                style: sty(font: regular, size: 10, color: grey)),
+          ),
         ],
       ),
     ));
+
     await Printing.layoutPdf(onLayout: (_) async => pdf.save());
   }
 
@@ -533,9 +692,11 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(children: [
-                // Mic Zone
-                _micZone(),
-                const SizedBox(height: 16),
+                // Mic Zone — hidden once items are added
+                if (_billItems.isEmpty) ...[
+                  _micZone(),
+                  const SizedBox(height: 16),
+                ],
                 // Draft cards
                 if (_drafts.isNotEmpty && _billItems.isEmpty) ...[
                   ..._drafts.map((d) => _draftCard(d)),
@@ -743,7 +904,6 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
                 Expanded(flex: 3, child: Text('आइटम', style: TextStyle(fontSize: 10, color: AppColors.textMuted, fontWeight: FontWeight.w600))),
                 Expanded(flex: 2, child: Text('दर (₹)', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, color: AppColors.textMuted, fontWeight: FontWeight.w600))),
                 Expanded(flex: 2, child: Text('मात्रा', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, color: AppColors.textMuted, fontWeight: FontWeight.w600))),
-                Expanded(flex: 1, child: Text('इकाई', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, color: AppColors.textMuted, fontWeight: FontWeight.w600))),
                 Expanded(flex: 2, child: Text('कुल (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 10, color: AppColors.textMuted, fontWeight: FontWeight.w600))),
               ],
             ),
@@ -754,6 +914,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
           ListView.separated(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
+            padding: EdgeInsets.zero,
             itemCount: _billItems.length,
             separatorBuilder: (_, __) => const Divider(height: 1, color: AppColors.border),
             itemBuilder: (_, i) => _billRow(i),
@@ -778,64 +939,81 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
 
   Widget _billRow(int i) {
     final item = _billItems[i];
+    final priceStr = item.pricePerUnit % 1 == 0
+        ? item.pricePerUnit.toInt().toString()
+        : item.pricePerUnit.toStringAsFixed(1);
+    final qtyStr = item.quantity % 1 == 0
+        ? item.quantity.toInt().toString()
+        : item.quantity.toStringAsFixed(1);
+
     return Container(
       color: item.hasError ? AppColors.dangerLight : null,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           // Item name
           Expanded(
             flex: 3,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                GestureDetector(
-                  onTap: () => _showItemPicker(i),
-                  child: Text(
+            child: GestureDetector(
+              onTap: () => _showItemPicker(i),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
                     item.itemName.isEmpty ? 'आइटम का नाम' : item.itemName,
                     style: TextStyle(
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                       fontSize: 13,
                       color: item.itemName.isEmpty ? AppColors.textMuted : AppColors.textPrimary,
                     ),
                   ),
-                ),
-                if (item.itemName.isNotEmpty)
-                  Text('₹/${_getUnit(item)}',
-                      style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
-              ],
+                  if (item.itemName.isNotEmpty)
+                    Text('₹/${_getUnit(item)}',
+                        style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                ],
+              ),
             ),
           ),
 
-          // Price stepper
+          // Price — tappable
           Expanded(
             flex: 2,
-            child: _stepper(item.pricePerUnit, (v) => _updateItem(i, price: v)),
-          ),
-
-          // Quantity stepper
-          Expanded(
-            flex: 2,
-            child: _stepper(item.quantity, (v) => _updateItem(i, qty: v)),
-          ),
-
-          // Unit badge
-          Expanded(
-            flex: 1,
-            child: Center(
+            child: GestureDetector(
+              onTap: () => _showNumberPad(i, isPrice: true),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                margin: const EdgeInsets.symmetric(horizontal: 2),
                 decoration: BoxDecoration(
-                  color: AppColors.surface2,
-                  borderRadius: BorderRadius.circular(6),
+                  color: AppColors.bg,
+                  borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: AppColors.border),
                 ),
-                child: Text(
-                  _getUnit(item),
-                  style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
-                  textAlign: TextAlign.center,
+                child: Text(priceStr,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary)),
+              ),
+            ),
+          ),
+
+          // Quantity — tappable
+          Expanded(
+            flex: 2,
+            child: GestureDetector(
+              onTap: () => _showNumberPad(i, isPrice: false),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                margin: const EdgeInsets.symmetric(horizontal: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.bg,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.border),
                 ),
+                child: Text(qtyStr,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary)),
               ),
             ),
           ),
@@ -847,7 +1025,8 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 Text('₹${item.itemTotal.toStringAsFixed(0)}',
-                    style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.primary, fontSize: 13)),
+                    style: const TextStyle(fontWeight: FontWeight.w700,
+                        color: AppColors.primary, fontSize: 13)),
                 const SizedBox(width: 4),
                 GestureDetector(
                   onTap: () => _removeItem(i),
@@ -857,6 +1036,161 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showNumberPad(int itemIndex, {required bool isPrice}) {
+    final item = _billItems[itemIndex];
+    final currentValue = isPrice ? item.pricePerUnit : item.quantity;
+    String input = currentValue % 1 == 0
+        ? currentValue.toInt().toString()
+        : currentValue.toStringAsFixed(1);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setModal) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Handle
+              Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 8),
+                width: 36, height: 4,
+                decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+              // Sticky item row
+              Container(
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.primaryLight,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(children: [
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(item.itemName,
+                          style: const TextStyle(fontWeight: FontWeight.w700,
+                              fontSize: 14, color: AppColors.textPrimary)),
+                      Text(isPrice ? 'दर बदलें' : 'मात्रा बदलें',
+                          style: const TextStyle(fontSize: 11, color: AppColors.primary,
+                              fontWeight: FontWeight.w500)),
+                    ]),
+                  ),
+                  Text('₹${item.itemTotal.toStringAsFixed(0)}',
+                      style: const TextStyle(fontWeight: FontWeight.w700,
+                          fontSize: 15, color: AppColors.primary)),
+                ]),
+              ),
+              // Display
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(
+                    color: AppColors.bg,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.primary.withOpacity(0.4)),
+                  ),
+                  child: Center(
+                    child: Text(
+                      isPrice ? '₹$input' : input,
+                      style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800,
+                          color: AppColors.textPrimary, letterSpacing: -1),
+                    ),
+                  ),
+                ),
+              ),
+              // Keypad
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Column(
+                  children: [
+                    for (final row in [
+                      ['7', '8', '9'],
+                      ['4', '5', '6'],
+                      ['1', '2', '3'],
+                      ['.', '0', '⌫'],
+                    ])
+                      Row(
+                        children: row.map((key) => Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: GestureDetector(
+                              onTap: () => setModal(() {
+                                if (key == '⌫') {
+                                  if (input.length > 1) {
+                                    input = input.substring(0, input.length - 1);
+                                  } else {
+                                    input = '0';
+                                  }
+                                } else if (key == '.' && input.contains('.')) {
+                                  // ignore
+                                } else {
+                                  input = (input == '0' && key != '.') ? key : input + key;
+                                }
+                              }),
+                              child: Container(
+                                height: 52,
+                                decoration: BoxDecoration(
+                                  color: key == '⌫' ? AppColors.dangerLight : AppColors.bg,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: AppColors.border),
+                                ),
+                                child: Center(
+                                  child: Text(key,
+                                      style: TextStyle(
+                                          fontSize: key == '⌫' ? 18 : 20,
+                                          fontWeight: FontWeight.w600,
+                                          color: key == '⌫' ? AppColors.danger : AppColors.textPrimary)),
+                                ),
+                              ),
+                            ),
+                          ),
+                        )).toList(),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              // Confirm
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      final val = double.tryParse(input) ?? 0;
+                      if (isPrice) {
+                        _updateItem(itemIndex, price: val);
+                      } else {
+                        _updateItem(itemIndex, qty: val.clamp(0.1, double.infinity));
+                      }
+                      Navigator.pop(ctx);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('ठीक है',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
