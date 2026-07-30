@@ -269,7 +269,7 @@ class _RecordingScreenState extends State<RecordingScreen>
           ),
           const SizedBox(height: 8),
           const Text(
-            'हिंदी या English में बोलें',
+            'हिंदी या अंग्रेज़ी में बोलें',
             style: TextStyle(fontSize: 13, color: AppColors.textMuted),
           ),
 

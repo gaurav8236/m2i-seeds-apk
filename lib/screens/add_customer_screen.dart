@@ -78,7 +78,7 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
                           color: Colors.white,
                           fontWeight: FontWeight.w700,
                           fontSize: 16)),
-                  Text('Add New Customer',
+                  Text('ग्राहक की जानकारी भरें',
                       style: TextStyle(color: Colors.white70, fontSize: 11)),
                 ]),
               ]),
@@ -106,7 +106,7 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
                     controller: _nameCtrl,
                     textCapitalization: TextCapitalization.words,
                     decoration: const InputDecoration(
-                      hintText: 'जैसे: Ramesh Kumar',
+                      hintText: 'जैसे: रमेश कुमार',
                       prefixIcon: Icon(Icons.person_outline, size: 18),
                     ),
                     validator: (v) =>

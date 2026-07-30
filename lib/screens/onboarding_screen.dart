@@ -20,7 +20,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       color: Color(0xFF1A56DB),
       bgColor: Color(0xFFE8F0FE),
       title: 'बोलकर बिल बनाएं',
-      subtitle: 'हिंदी या English में बोलें — AI खुद आइटम पहचान लेगा',
+      subtitle: 'हिंदी या अंग्रेज़ी में बोलें — AI खुद आइटम पहचान लेगा',
       hint: '"आलू दो किलो, मैगी एक"',
     ),
     _OnboardingStep(

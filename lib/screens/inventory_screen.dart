@@ -251,7 +251,7 @@ class _InventoryScreenState extends State<InventoryScreen>
               const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('इन्वेंट्री प्रबंधन',
                     style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
-                Text('Inventory Management',
+                Text('सामान और स्टॉक प्रबंधन',
                     style: TextStyle(color: Colors.white70, fontSize: 10)),
               ]),
             ]),
@@ -323,7 +323,7 @@ class _InventoryScreenState extends State<InventoryScreen>
           controller: _nameCtrl,
           focusNode: _nameFocus,
           decoration: const InputDecoration(
-            hintText: 'उदा. Basmati Rice',
+            hintText: 'उदा. बासमती चावल',
             isDense: true,
             contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           ),
@@ -434,7 +434,7 @@ class _InventoryScreenState extends State<InventoryScreen>
         const SizedBox(height: 12),
 
         // ── Aliases ──────────────────────────────────────────────────────
-        _lbl('बोलने के नाम (Voice Aliases)'),
+        _lbl('बोलने के नाम'),
         const SizedBox(height: 4),
         Row(children: [
           Expanded(
@@ -497,7 +497,7 @@ class _InventoryScreenState extends State<InventoryScreen>
               border: Border.all(color: AppColors.primary.withOpacity(0.2)),
             ),
             child: Text(
-              '${_lowStockLimit.toInt()} ${_unitCtrl.text.isNotEmpty ? _unitCtrl.text : 'units'}',
+              '${_lowStockLimit.toInt()} ${_unitCtrl.text.isNotEmpty ? _unitCtrl.text : 'इकाई'}',
               style: const TextStyle(
                   color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 12),
             ),

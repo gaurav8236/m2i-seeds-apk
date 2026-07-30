@@ -214,7 +214,7 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
                 ]),
                 const SizedBox(height: 14),
                 // Aliases
-                _lbl('Voice Aliases (बोलने के नाम)'),
+                _lbl('बोलने के नाम'),
                 const SizedBox(height: 6),
                 Row(children: [
                   Expanded(
@@ -278,7 +278,7 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
-                        '${_lowStockLimit.toInt()} ${_unitCtrl.text.isNotEmpty ? _unitCtrl.text : 'units'}',
+                        '${_lowStockLimit.toInt()} ${_unitCtrl.text.isNotEmpty ? _unitCtrl.text : 'इकाई'}',
                         style: const TextStyle(
                             color: AppColors.primary,
                             fontWeight: FontWeight.w700,

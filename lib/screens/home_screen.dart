@@ -232,9 +232,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   // ── Secondary actions ────────────────────────────────
                   Row(
                     children: [
-                      Expanded(child: _actionCard(context, Icons.inventory_2_outlined, 'स्टॉक', 'Inventory', 2)),
+                      Expanded(child: _actionCard(context, Icons.inventory_2_outlined, 'स्टॉक', 'प्रबंधन करें', 2)),
                       const SizedBox(width: 10),
-                      Expanded(child: _actionCard(context, Icons.menu_book_outlined, 'ग्राहक खाता', 'Ledger', 3)),
+                      Expanded(child: _actionCard(context, Icons.menu_book_outlined, 'ग्राहक खाता', 'बकाया देखें', 3)),
                     ],
                   ),
                   const SizedBox(height: 20),
@@ -490,7 +490,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   Text('नया बिल बनाएं',
                       style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
                   SizedBox(height: 2),
-                  Text('बोलकर बिल — हिंदी या English',
+                  Text('बोलकर बिल — हिंदी या अंग्रेज़ी',
                       style: TextStyle(color: Colors.white70, fontSize: 12)),
                 ],
               ),

@@ -156,7 +156,7 @@ class _ReportsScreenState extends State<ReportsScreen>
                     Text('खाता-बही',
                         style: TextStyle(color: Colors.white,
                             fontWeight: FontWeight.w700, fontSize: 15)),
-                    Text('Ledger & Reports',
+                    Text('ग्राहक खाता और रिपोर्ट',
                         style: TextStyle(color: Colors.white70, fontSize: 10)),
                   ]),
                 ]),

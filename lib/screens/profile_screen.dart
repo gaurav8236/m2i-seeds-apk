@@ -115,7 +115,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text('प्रोफ़ाइल', style: TextStyle(
                         color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16)),
-                    Text('Profile', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                    Text('आपकी दुकान की जानकारी', style: TextStyle(color: Colors.white70, fontSize: 11)),
                   ]),
                 ]),
                 const SizedBox(height: 20),

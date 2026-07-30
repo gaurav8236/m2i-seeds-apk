@@ -1,7 +1,7 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:printing/printing.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -10,6 +10,7 @@ import '../services/draft_service.dart';
 import '../services/supabase_service.dart';
 import '../services/voice_service.dart';
 import '../theme.dart';
+import '../utils/devanagari.dart';
 import 'past_bills_screen.dart';
 import 'recording_screen.dart';
 
@@ -22,12 +23,9 @@ class VoiceBillingScreen extends StatefulWidget {
   State<VoiceBillingScreen> createState() => _VoiceBillingScreenState();
 }
 
-class _VoiceBillingScreenState extends State<VoiceBillingScreen>
-    with TickerProviderStateMixin {
+class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   BillingView _view = BillingView.input;
-  bool _isRecording = false;
   bool _isProcessing = false;
-  String _spokenText = '';
   List<BillItem> _billItems = [];
   List<StockItem> _stockList = [];
   List<String> _customerNames = [];
@@ -40,39 +38,31 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
 
   // Settlement
   final _customerController = TextEditingController();
+  final _customerFocusNode = FocusNode();
   bool _showCustomerSuggestions = false;
-
-  // Voice AI animation — 3 staggered pulse rings + mic breathe
-  late List<AnimationController> _ringControllers;
-  late AnimationController _breatheController;
 
   @override
   void initState() {
     super.initState();
-    // 3 rings staggered 500ms apart — pulse outward and fade
-    _ringControllers = List.generate(3, (i) {
-      final ctrl = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 1800),
-      );
-      Future.delayed(Duration(milliseconds: i * 600), () {
-        if (mounted) ctrl.repeat();
-      });
-      return ctrl;
+    // Show the customer dropdown as soon as the field is focused, not just
+    // once the user starts typing — a short delay on blur lets a tap on a
+    // suggestion register before the list disappears.
+    _customerFocusNode.addListener(() {
+      if (_customerFocusNode.hasFocus) {
+        setState(() => _showCustomerSuggestions = true);
+      } else {
+        Future.delayed(const Duration(milliseconds: 150), () {
+          if (mounted) setState(() => _showCustomerSuggestions = false);
+        });
+      }
     });
-    // Mic button breathes gently while recording
-    _breatheController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 900),
-    )..repeat(reverse: true);
     _loadData();
   }
 
   @override
   void dispose() {
-    for (final c in _ringControllers) c.dispose();
-    _breatheController.dispose();
     _customerController.dispose();
+    _customerFocusNode.dispose();
     VoiceService.dispose();
     super.dispose();
   }
@@ -138,92 +128,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
           id: '', currentStock: 0, sellingPrice: 0, lowStockLimit: 0,
           aliases: [], itemName: '', category: '', unit: ''),
     );
-    return stock.unit.isEmpty ? 'unit' : stock.unit;
-  }
-
-  Future<void> _startRecording() async {
-    var status = await Permission.microphone.status;
-
-    if (!status.isGranted) {
-      status = await Permission.microphone.request();
-      if (!status.isGranted) {
-        if (mounted) _showSnack('माइक की अनुमति चाहिए');
-        return;
-      }
-      // Permission just granted — Android hasn't propagated it to the audio
-      // subsystem yet. Return and let the user tap once more to start recording.
-      if (mounted) _showSnack('अनुमति मिल गई! अब माइक दबाएं');
-      return;
-    }
-
-    try {
-      await VoiceService.startRecording();
-      setState(() {
-        _isRecording = true;
-        _spokenText = '';
-        _billItems = [];
-      });
-    } catch (e) {
-      if (mounted) _showSnack('रिकॉर्डिंग शुरू नहीं हो सकी: $e');
-    }
-  }
-
-  Future<void> _stopRecording() async {
-    setState(() => _isRecording = false);
-    final path = await VoiceService.stopRecording();
-    if (path == null) return;
-
-    setState(() => _isProcessing = true);
-    try {
-      final results = await VoiceService.processVoice(audioPath: path);
-      final processed = _processResults(results);
-      setState(() => _billItems = processed);
-    } catch (e) {
-      _showSnack('आवाज़ प्रोसेस नहीं हो सकी: $e');
-    } finally {
-      setState(() => _isProcessing = false);
-    }
-  }
-
-  List<BillItem> _processResults(List<Map<String, dynamic>> results) {
-    final processed = <BillItem>[];
-    for (final r in results) {
-      final hasError = r['error'] != null && r['error'] != false;
-
-      if (!hasError) {
-        processed.add(BillItem.fromMap(r));
-      } else if (r['error'] is String) {
-        // Try to extract closest match
-        final errorStr = r['error'] as String;
-        final match = RegExp(r'Closest:\s*(.+?)\s*\(\d+%\)').firstMatch(errorStr);
-        if (match != null) {
-          final closestName = match.group(1)!.trim();
-          final stockItem = _stockList.firstWhere(
-            (s) => s.itemName == closestName,
-            orElse: () => StockItem(
-                id: '', currentStock: 0, sellingPrice: 0, lowStockLimit: 0,
-                aliases: [], itemName: '', category: '', unit: ''),
-          );
-          if (stockItem.id.isNotEmpty) {
-            final qty = (r['quantity_billed'] as num?)?.toDouble() ?? 1;
-            final price = stockItem.sellingPrice;
-            processed.add(BillItem(
-              itemName: closestName,
-              quantity: qty,
-              pricePerUnit: price,
-              itemTotal: qty * price,
-              stockRemaining: stockItem.currentStock - qty,
-              stockId: stockItem.id,
-              currentStock: stockItem.currentStock,
-              unit: stockItem.unit,
-            ));
-          }
-        }
-        // else skip — no match
-      }
-      // error == true → skip
-    }
-    return processed;
+    return stock.unit.isEmpty ? 'इकाई' : stock.unit;
   }
 
   void _updateItem(int i, {double? qty, double? price}) {
@@ -276,6 +181,11 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
     });
   }
 
+  void _addManualItem() {
+    _addBlankItem();
+    _showItemPicker(_billItems.length - 1);
+  }
+
   Future<void> _finalizeBill() async {
     setState(() => _isProcessing = true);
     try {
@@ -305,7 +215,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
     }
   }
 
-  Future<void> _downloadPdf() async {
+  Future<Uint8List> _buildBillPdfBytes() async {
     // Load fonts (Noto Sans supports ₹, Latin, and Devanagari)
     final regular = await PdfGoogleFonts.notoSansRegular();
     final bold = await PdfGoogleFonts.notoSansBold();
@@ -325,7 +235,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
     const double tblHeadH  = 28.0;
     final double itemsH    = _billItems.length * 24.0;
     final double summaryH  = 50.0 + (_discount > 0 ? 18.0 : 0);
-    const double footerH   = 44.0;
+    const double footerH   = 26.0;
     final double totalH    = headerH + infoH + tblHeadH + itemsH + summaryH + footerH;
 
     final pageFormat = PdfPageFormat(pageWidth, totalH, marginAll: 14);
@@ -365,7 +275,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
           ),
           pw.SizedBox(height: 3),
           pw.Center(
-            child: pw.Text('दुकानदार सहायक',
+            child: pw.Text(fixDevanagariMatra('दुकानदार सहायक'),
                 style: sty(font: devaRegular, size: 10, color: grey)),
           ),
           pw.SizedBox(height: 10),
@@ -375,7 +285,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
           pw.SizedBox(height: 6),
           pw.RichText(
             text: pw.TextSpan(children: [
-              pw.TextSpan(text: 'दिनांक: ',
+              pw.TextSpan(text: fixDevanagariMatra('दिनांक: '),
                   style: sty(font: devaBold, size: 11)),
               pw.TextSpan(text: DateFormat('d/M/yyyy').format(DateTime.now()),
                   style: sty(font: regular, size: 11)),
@@ -385,16 +295,16 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
             pw.SizedBox(height: 4),
             pw.RichText(
               text: pw.TextSpan(children: [
-                pw.TextSpan(text: 'ग्राहक: ',
+                pw.TextSpan(text: fixDevanagariMatra('ग्राहक: '),
                     style: sty(font: devaBold, size: 11)),
-                pw.TextSpan(text: _customerName,
+                pw.TextSpan(text: fixDevanagariMatra(_customerName),
                     style: sty(font: regular, size: 11)),
               ]),
             ),
           ],
           if (_isCredit) ...[
             pw.SizedBox(height: 4),
-            pw.Text('** उधार बिल (CREDIT BILL) **',
+            pw.Text(fixDevanagariMatra('** उधार बिल **'),
                 style: sty(font: devaBold, size: 11, color: red)),
           ],
           pw.SizedBox(height: 10),
@@ -402,12 +312,12 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
           // ── TABLE HEADER — order: आइटम | मात्रा | इकाई | दर | कुल ──
           pw.Row(children: [
             pw.Expanded(flex: 5,
-                child: pw.Text('आइटम', style: sty(font: devaBold, size: 10))),
+                child: pw.Text(fixDevanagariMatra('आइटम'), style: sty(font: devaBold, size: 10))),
             pw.SizedBox(width: 32,
-                child: pw.Text('मात्रा', textAlign: pw.TextAlign.center,
+                child: pw.Text(fixDevanagariMatra('मात्रा'), textAlign: pw.TextAlign.center,
                     style: sty(font: devaBold, size: 10))),
             pw.SizedBox(width: 30,
-                child: pw.Text('इकाई', textAlign: pw.TextAlign.center,
+                child: pw.Text(fixDevanagariMatra('इकाई'), textAlign: pw.TextAlign.center,
                     style: sty(font: devaBold, size: 10))),
             pw.SizedBox(width: 30,
                 child: pw.Text('दर', textAlign: pw.TextAlign.right,
@@ -426,7 +336,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Expanded(flex: 5,
-                    child: pw.Text(item.itemName,
+                    child: pw.Text(fixDevanagariMatra(item.itemName),
                         style: sty(font: regular, size: 10))),
                 pw.SizedBox(width: 32,
                     child: pw.Text(
@@ -436,7 +346,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
                         textAlign: pw.TextAlign.center,
                         style: sty(font: regular, size: 10))),
                 pw.SizedBox(width: 30,
-                    child: pw.Text(_getUnit(item),
+                    child: pw.Text(fixDevanagariMatra(_getUnit(item)),
                         textAlign: pw.TextAlign.center,
                         style: sty(font: regular, size: 10))),
                 pw.SizedBox(width: 30,
@@ -460,7 +370,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
-              pw.Text('उप-कुल', style: sty(font: devaRegular, size: 11)),
+              pw.Text(fixDevanagariMatra('उप-कुल राशि'), style: sty(font: devaRegular, size: 11)),
               pw.Text('₹${_subTotal.toStringAsFixed(2)}',
                   style: sty(font: regular, size: 11)),
             ],
@@ -482,7 +392,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
-              pw.Text('कुल राशि', style: sty(font: devaBold, size: 13)),
+              pw.Text(fixDevanagariMatra('कुल राशि'), style: sty(font: devaBold, size: 13)),
               pw.Text('₹${_grandTotal.toStringAsFixed(2)}',
                   style: sty(font: bold, size: 13)),
             ],
@@ -492,26 +402,30 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
 
           // ── FOOTER ───────────────────────────────────────────────────
           pw.Center(
-            child: pw.Text('धन्यवाद! फिर पधारें।',
+            child: pw.Text(fixDevanagariMatra('धन्यवाद! फिर पधारें।'),
                 style: sty(font: devaRegular, size: 10, color: grey)),
-          ),
-          pw.SizedBox(height: 2),
-          pw.Center(
-            child: pw.Text('(Thank you for shopping)',
-                style: sty(font: regular, size: 10, color: grey)),
           ),
         ],
       ),
     ));
 
-    await Printing.layoutPdf(onLayout: (_) async => pdf.save());
+    return pdf.save();
+  }
+
+  Future<void> _downloadPdf() async {
+    final bytes = await _buildBillPdfBytes();
+    await Printing.layoutPdf(onLayout: (_) async => bytes);
+  }
+
+  Future<void> _sharePdfOnWhatsApp() async {
+    final bytes = await _buildBillPdfBytes();
+    await Printing.sharePdf(bytes: bytes, filename: 'bill.pdf');
   }
 
   void _resetBill() {
     setState(() {
       _view = BillingView.input;
       _billItems = [];
-      _spokenText = '';
       _discount = 0;
       _isCredit = false;
       _customerName = '';
@@ -646,7 +560,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
                         const SizedBox(width: 8),
                         const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                           Text('SmartDukan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
-                          Text('Voice Billing', style: TextStyle(color: Colors.white70, fontSize: 10)),
+                          Text('बोलकर बिलिंग', style: TextStyle(color: Colors.white70, fontSize: 10)),
                         ]),
                       ]),
                       TextButton.icon(
@@ -717,7 +631,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
 
   Widget _micZone() {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
@@ -725,149 +639,83 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Mic button with pulsing rings
-          SizedBox(
-            width: 200,
-            height: 200,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                // 3 staggered pulse rings (only when recording)
-                if (_isRecording)
-                  ..._ringControllers.map((ctrl) => _pulseRing(ctrl)),
-
-                // Mic button — opens full-screen recording
-                GestureDetector(
-                  onTap: _isProcessing ? null : _openRecordingScreen,
-                  child: AnimatedBuilder(
-                    animation: _breatheController,
-                    builder: (_, child) {
-                      final scale = _isRecording
-                          ? 1.0 + _breatheController.value * 0.07
-                          : 1.0;
-                      return Transform.scale(
-                        scale: scale,
-                        child: child,
-                      );
-                    },
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      width: 88, height: 88,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: _isRecording
-                            ? const LinearGradient(
-                                colors: [Color(0xFFDC2626), Color(0xFFEF4444)],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              )
-                            : primaryGradient,
-                        boxShadow: [
-                          BoxShadow(
-                            color: (_isRecording ? AppColors.danger : AppColors.primary)
-                                .withOpacity(_isRecording ? 0.55 : 0.35),
-                            blurRadius: _isRecording ? 32 : 24,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      child: _isProcessing
-                          ? const Padding(
-                              padding: EdgeInsets.all(24),
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
-                            )
-                          : const Icon(Icons.mic, color: Colors.white, size: 34),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          const Text('निर्माण की विधि चुनें',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: AppColors.textPrimary)),
+          const SizedBox(height: 14),
+          _methodCard(
+            icon: Icons.mic,
+            title: 'वॉयस बिल',
+            subtitle: 'बिल बनाने के लिए एआई से बात करें',
+            loading: _isProcessing,
+            onTap: _isProcessing ? null : _openRecordingScreen,
           ),
-
-          // Status text
-          if (_isProcessing)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: const [
-                SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.primary)),
-                SizedBox(width: 8),
-                Text('AI आइटम पहचान रहा है...', style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.w600, fontSize: 14)),
-              ],
-            )
-          else if (_isRecording)
-            Column(children: [
-              const Text('सुन रहा है... बोलते रहें',
-                  style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.w700, fontSize: 14)),
-              const SizedBox(height: 6),
-              OutlinedButton(
-                onPressed: _stopRecording,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.danger,
-                  side: const BorderSide(color: AppColors.danger),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
-                ),
-                child: const Text('रोकें — Stop', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-              ),
-            ])
-          else
-            Column(children: const [
-              Text('माइक दबाएं और बोलें',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.textPrimary)),
-              SizedBox(height: 4),
-              Text('हिंदी या English — "aloo do kilo, maggi ek"',
-                  style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-            ]),
-
-          // Transcript
-          if (_spokenText.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.successLight,
-                border: Border.all(color: const Color(0xFFBBF7D0)),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('AI ने सुना',
-                    style: TextStyle(color: AppColors.success, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.6)),
-                const SizedBox(height: 4),
-                Text('"$_spokenText"',
-                    style: const TextStyle(fontSize: 14, color: Color(0xFF14532D), fontStyle: FontStyle.italic)),
-              ]),
-            ),
-          ],
+          const SizedBox(height: 12),
+          _methodCard(
+            icon: Icons.list_alt_outlined,
+            title: 'मैनुअल बिल',
+            subtitle: 'खुद से बिल बनाएं',
+            onTap: _addManualItem,
+          ),
         ],
       ),
     );
   }
 
-  Widget _pulseRing(AnimationController ctrl) {
-    return AnimatedBuilder(
-      animation: ctrl,
-      builder: (_, __) {
-        final t = ctrl.value;
-        // Ease out: fast expand, slow fade
-        final scale = 0.9 + t * 1.35;
-        final opacity = (1 - t) * (_isRecording ? 0.4 : 0.0);
-        return Transform.scale(
-          scale: scale,
-          child: Container(
-            width: 88,
-            height: 88,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: AppColors.danger.withOpacity(opacity),
-                width: 2.5,
+  Widget _methodCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback? onTap,
+    bool loading = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44, height: 44,
+              decoration: const BoxDecoration(
+                color: AppColors.primaryLight,
+                shape: BoxShape.circle,
+              ),
+              child: loading
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.primary),
+                    )
+                  : Icon(icon, color: AppColors.primary, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.textPrimary)),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                ],
               ),
             ),
-          ),
-        );
-      },
+            const SizedBox(width: 8),
+            Container(
+              width: 22, height: 22,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: AppColors.border, width: 2),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -889,7 +737,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
               children: [
                 const Text('बिल आइटम',
                     style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 0.6)),
-                Text('${_billItems.length} item${_billItems.length != 1 ? "s" : ""}',
+                Text('${_billItems.length} आइटम',
                     style: const TextStyle(fontSize: 11, color: AppColors.textMuted, fontWeight: FontWeight.w600)),
               ],
             ),
@@ -1279,7 +1127,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('छूट (Discount)',
+              const Text('छूट',
                   style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: AppColors.textSecondary)),
               SizedBox(
                 width: 100,
@@ -1389,7 +1237,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
                     const SizedBox(width: 12),
                     const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text('बिल सेटलमेंट', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16)),
-                      Text('Settlement', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                      Text('भुगतान की जानकारी भरें', style: TextStyle(color: Colors.white70, fontSize: 11)),
                     ]),
                   ]),
                   const SizedBox(height: 16),
@@ -1482,7 +1330,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
                       children: [
                         const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                           Text('उधार पर?', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                          Text('On Credit', style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                          Text('ग्राहक अभी भुगतान नहीं करेगा', style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
                         ]),
                         Switch(
                           value: _isCredit,
@@ -1501,37 +1349,45 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
                         const SizedBox(height: 6),
                         TextField(
                           controller: _customerController,
+                          focusNode: _customerFocusNode,
                           decoration: const InputDecoration(
                             hintText: 'खोजें या नया नाम लिखें...',
                           ),
-                          onChanged: (v) {
-                            setState(() {
-                              _customerName = v;
-                              _showCustomerSuggestions = v.isNotEmpty;
-                            });
-                          },
+                          onChanged: (v) => setState(() => _customerName = v),
                         ),
-                        if (_showCustomerSuggestions && suggestions.isNotEmpty)
+                        if (_showCustomerSuggestions)
                           Container(
                             margin: const EdgeInsets.only(top: 4),
+                            constraints: const BoxConstraints(maxHeight: 220),
                             decoration: BoxDecoration(
                               color: Colors.white,
                               border: Border.all(color: AppColors.border),
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            child: Column(
-                              children: suggestions.take(5).map((name) => ListTile(
-                                dense: true,
-                                title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                                onTap: () {
-                                  _customerController.text = name;
-                                  setState(() {
-                                    _customerName = name;
-                                    _showCustomerSuggestions = false;
-                                  });
-                                },
-                              )).toList(),
-                            ),
+                            child: suggestions.isEmpty
+                                ? Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Text(
+                                      'कोई मौजूदा ग्राहक नहीं मिला — नया ग्राहक जोड़ा जाएगा',
+                                      style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                                    ),
+                                  )
+                                : ListView(
+                                    padding: EdgeInsets.zero,
+                                    shrinkWrap: true,
+                                    children: suggestions.map((name) => ListTile(
+                                      dense: true,
+                                      title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                                      onTap: () {
+                                        _customerController.text = name;
+                                        setState(() {
+                                          _customerName = name;
+                                          _showCustomerSuggestions = false;
+                                        });
+                                        _customerFocusNode.unfocus();
+                                      },
+                                    )).toList(),
+                                  ),
                           ),
                       ],
                     ),
@@ -1601,7 +1457,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
                   const Text('बिल पक्का हो गया!',
                       style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 22)),
                   const SizedBox(height: 4),
-                  const Text('Bill saved successfully',
+                  const Text('बिल सफलतापूर्वक सहेजा गया',
                       style: TextStyle(color: Colors.white70, fontSize: 13)),
                   const SizedBox(height: 20),
                   Container(
@@ -1644,6 +1500,21 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       side: const BorderSide(color: AppColors.borderStrong),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _sharePdfOnWhatsApp,
+                    icon: const Icon(Icons.share_outlined, color: Color(0xFF25D366)),
+                    label: const Text('WhatsApp पर शेयर करें',
+                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: Color(0xFF25D366))),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      side: const BorderSide(color: Color(0xFF25D366)),
                     ),
                   ),
                 ),
