@@ -22,7 +22,7 @@ class _HomeScreenState extends State<HomeScreen> {
   double _credit = 0, _paid = 0, _outstanding = 0;
   int _lowStockCount = 0;
   List<Bill> _recentBills = [];
-  StatsPeriod _period = StatsPeriod.today;
+  StatsPeriod _period = StatsPeriod.thisMonth;
   String? _avatarUrl;
   String? _displayName;
 

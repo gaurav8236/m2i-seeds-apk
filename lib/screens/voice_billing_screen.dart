@@ -368,48 +368,50 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(color: Colors.white.withOpacity(0.3)),
                           ),
-                          child: const Icon(Icons.mic, color: Colors.white, size: 17),
+                          child: const Icon(Icons.receipt_long, color: Colors.white, size: 17),
                         ),
                         const SizedBox(width: 8),
                         const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('SmartDukan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
-                          Text('बोलकर बिलिंग', style: TextStyle(color: Colors.white70, fontSize: 10)),
+                          Text('नया बिल', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
+                          Text('बिल बनाएं', style: TextStyle(color: Colors.white70, fontSize: 10)),
                         ]),
                       ]),
-                      TextButton.icon(
+                      ElevatedButton.icon(
                         onPressed: () => Navigator.push(context,
                             MaterialPageRoute(builder: (_) => const PastBillsScreen())),
-                        icon: const Icon(Icons.history, color: Colors.white, size: 14),
-                        label: const Text('इतिहास', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12)),
-                        style: TextButton.styleFrom(
-                          backgroundColor: Colors.white.withOpacity(0.15),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
-                            side: BorderSide(color: Colors.white.withOpacity(0.3)),
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                        icon: const Icon(Icons.history, size: 14),
+                        label: const Text('पुराने बिल', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: AppColors.primary,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withOpacity(0.2)),
+                  // Show total only when items exist
+                  if (_billItems.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white.withOpacity(0.2)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('कुल राशि',
+                              style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 12, fontWeight: FontWeight.w600)),
+                          Text('₹${_grandTotal.toStringAsFixed(0)}',
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 22, letterSpacing: -0.5)),
+                        ],
+                      ),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('कुल राशि',
-                            style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 12, fontWeight: FontWeight.w600)),
-                        Text('₹${_grandTotal.toStringAsFixed(0)}',
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 22, letterSpacing: -0.5)),
-                      ],
-                    ),
-                  ),
+                  ],
                 ]),
               ),
             ),
@@ -419,15 +421,25 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(children: [
-                // Mic Zone — hidden once items are added
                 if (_billItems.isEmpty) ...[
+                  // Method selection
                   _micZone(),
+                  // Draft section below
+                  if (_drafts.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('अधूरे बिल',
+                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textPrimary)),
+                        Text('${_drafts.length} बचे हुए',
+                            style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    ..._drafts.map((d) => _draftCard(d)),
+                  ],
                   const SizedBox(height: 16),
-                ],
-                // Draft cards
-                if (_drafts.isNotEmpty && _billItems.isEmpty) ...[
-                  ..._drafts.map((d) => _draftCard(d)),
-                  const SizedBox(height: 8),
                 ],
                 // Bill table
                 if (_billItems.isNotEmpty) _billTable(),
@@ -454,21 +466,24 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('निर्माण की विधि चुनें',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: AppColors.textPrimary)),
+          const Text('बिल कैसे बनाएं?',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.textPrimary)),
+          const SizedBox(height: 4),
+          const Text('एक तरीका चुनें',
+              style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
           const SizedBox(height: 14),
           _methodCard(
             icon: Icons.mic,
-            title: 'वॉयस बिल',
-            subtitle: 'बिल बनाने के लिए एआई से बात करें',
+            title: 'बोलकर बनाएं',
+            subtitle: 'बोलिए — AI बिल खुद तैयार करेगा',
             loading: _isProcessing,
             onTap: _isProcessing ? null : _openRecordingScreen,
           ),
           const SizedBox(height: 12),
           _methodCard(
             icon: Icons.list_alt_outlined,
-            title: 'मैनुअल बिल',
-            subtitle: 'खुद से बिल बनाएं',
+            title: 'हाथ से बनाएं',
+            subtitle: 'आइटम एक-एक करके चुनें',
             onTap: _addManualItem,
           ),
         ],

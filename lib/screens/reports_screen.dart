@@ -20,7 +20,7 @@ class _ReportsScreenState extends State<ReportsScreen>
   bool _loading = true;
 
   // Stats + filter
-  StatsPeriod _period = StatsPeriod.today;
+  StatsPeriod _period = StatsPeriod.thisMonth;
   DateTimeRange? _customRange;
   double _credit = 0, _paid = 0, _outstanding = 0;
   BillTypeFilter _typeFilter = BillTypeFilter.all;
@@ -594,6 +594,7 @@ class _CustomerDetailScreen extends StatefulWidget {
 class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
   bool _loading = true;
   List<Map<String, dynamic>> _ledger = [];
+  List<Bill> _customerBills = [];
   final _payCtrl = TextEditingController();
   bool _paying = false;
 
@@ -612,9 +613,18 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final data =
-          await SupabaseService.fetchCustomerLedger(widget.customer.name);
-      setState(() => _ledger = data);
+      final results = await Future.wait([
+        SupabaseService.fetchCustomerLedger(widget.customer.name),
+        SupabaseService.fetchPastBills(),
+      ]);
+      final ledger = results[0] as List<Map<String, dynamic>>;
+      final allBills = results[1] as List<Bill>;
+      setState(() {
+        _ledger = ledger;
+        _customerBills = allBills
+            .where((b) => b.customerName == widget.customer.name)
+            .toList();
+      });
     } finally {
       setState(() => _loading = false);
     }
@@ -822,6 +832,23 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                       ),
                   ]),
                 ),
+
+                // Bills of this customer
+                if (_customerBills.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('बिल इतिहास',
+                          style: TextStyle(
+                              fontSize: 10, fontWeight: FontWeight.w700,
+                              color: AppColors.textMuted,
+                              letterSpacing: 0.5)),
+                    ),
+                  ),
+                  ..._customerBills.map((b) => BillCard(bill: b)),
+                ],
               ]),
             ),
           ),

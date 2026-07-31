@@ -179,35 +179,50 @@ void showBillDetail(BuildContext context, Bill bill) {
 
 // ── Bill detail bottom sheet ─────────────────────────────────────────────────
 
-class _BillDetailSheet extends StatelessWidget {
+class _BillDetailSheet extends StatefulWidget {
   final Bill bill;
   const _BillDetailSheet({required this.bill});
+
+  @override
+  State<_BillDetailSheet> createState() => _BillDetailSheetState();
+}
+
+class _BillDetailSheetState extends State<_BillDetailSheet> {
+  bool _printLoading = false;
+  bool _shareLoading = false;
 
   String _fmt(double n) =>
       n >= 1000 ? '₹${(n / 1000).toStringAsFixed(1)}k' : '₹${n.toStringAsFixed(0)}';
 
-  Future<void> _buildAndShare(BuildContext context, {required bool print}) async {
-    final items = bill.billDetails.map((d) => BillItem.fromMap(d)).toList();
-    final discount = bill.discountAmount ?? 0;
-    final subTotal = bill.totalAmount + discount;
-    final bytes = await buildBillPdfBytes(
-      items: items,
-      customerName: bill.customerName ?? '',
-      isCredit: bill.isCredit,
-      subTotal: subTotal,
-      discount: discount,
-      grandTotal: bill.totalAmount,
-      date: bill.createdAt,
-    );
-    if (print) {
-      await Printing.layoutPdf(onLayout: (_) async => bytes);
-    } else {
-      await Printing.sharePdf(bytes: bytes, filename: 'bill.pdf');
+  Future<void> _buildAndShare({required bool isPrint}) async {
+    setState(() => isPrint ? _printLoading = true : _shareLoading = true);
+    try {
+      final bill = widget.bill;
+      final items = bill.billDetails.map((d) => BillItem.fromMap(d)).toList();
+      final discount = bill.discountAmount ?? 0;
+      final subTotal = bill.totalAmount + discount;
+      final bytes = await buildBillPdfBytes(
+        items: items,
+        customerName: bill.customerName ?? '',
+        isCredit: bill.isCredit,
+        subTotal: subTotal,
+        discount: discount,
+        grandTotal: bill.totalAmount,
+        date: bill.createdAt,
+      );
+      if (isPrint) {
+        await Printing.layoutPdf(onLayout: (_) async => bytes);
+      } else {
+        await Printing.sharePdf(bytes: bytes, filename: 'bill.pdf');
+      }
+    } finally {
+      if (mounted) setState(() => isPrint ? _printLoading = false : _shareLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final bill = widget.bill;
     final isCredit = bill.isCredit;
     final color = isCredit ? AppColors.danger : AppColors.success;
     final bgColor = isCredit ? AppColors.dangerLight : AppColors.successLight;
@@ -363,8 +378,11 @@ class _BillDetailSheet extends StatelessWidget {
             child: Row(children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () => _buildAndShare(context, print: true),
-                  icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
+                  onPressed: (_printLoading || _shareLoading) ? null : () => _buildAndShare(isPrint: true),
+                  icon: _printLoading
+                      ? const SizedBox(width: 16, height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary))
+                      : const Icon(Icons.picture_as_pdf_outlined, size: 16),
                   label: const Text('PDF / प्रिंट'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.primary,
@@ -377,8 +395,11 @@ class _BillDetailSheet extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: () => _buildAndShare(context, print: false),
-                  icon: const Icon(Icons.share_outlined, size: 16),
+                  onPressed: (_printLoading || _shareLoading) ? null : () => _buildAndShare(isPrint: false),
+                  icon: _shareLoading
+                      ? const SizedBox(width: 16, height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.share_outlined, size: 16),
                   label: const Text('WhatsApp'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF25D366),
