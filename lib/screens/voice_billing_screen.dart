@@ -1,16 +1,12 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
 import '../models/models.dart';
 import '../services/draft_service.dart';
 import '../services/supabase_service.dart';
 import '../services/voice_service.dart';
 import '../theme.dart';
-import '../utils/devanagari.dart';
+import '../utils/bill_pdf.dart';
 import 'past_bills_screen.dart';
 import 'recording_screen.dart';
 
@@ -215,210 +211,27 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
     }
   }
 
-  Future<Uint8List> _buildBillPdfBytes() async {
-    // Load fonts (Noto Sans supports ₹, Latin, and Devanagari)
-    final regular = await PdfGoogleFonts.notoSansRegular();
-    final bold = await PdfGoogleFonts.notoSansBold();
-    final devaRegular = await PdfGoogleFonts.notoSansDevanagariRegular();
-    final devaBold = await PdfGoogleFonts.notoSansDevanagariBold();
-
-    const PdfColor red = PdfColor.fromInt(0xFFDC2626);
-    const PdfColor grey = PdfColor.fromInt(0xFF6B7280);
-    const PdfColor black = PdfColors.black;
-
-    // 80mm thermal receipt width (226.77 pt)
-    const double pageWidth = 80 * PdfPageFormat.mm;
-
-    // Calculate dynamic height based on content
-    const double headerH   = 68.0;
-    final double infoH     = 44.0 + (_customerName.isNotEmpty ? 16.0 : 0) + (_isCredit ? 18.0 : 0);
-    const double tblHeadH  = 28.0;
-    final double itemsH    = _billItems.length * 24.0;
-    final double summaryH  = 50.0 + (_discount > 0 ? 18.0 : 0);
-    const double footerH   = 26.0;
-    final double totalH    = headerH + infoH + tblHeadH + itemsH + summaryH + footerH;
-
-    final pageFormat = PdfPageFormat(pageWidth, totalH, marginAll: 14);
-
-    // Dashed divider
-    pw.Widget dashedLine() => pw.Container(
-      margin: const pw.EdgeInsets.symmetric(vertical: 5),
-      decoration: const pw.BoxDecoration(
-        border: pw.Border(
-          bottom: pw.BorderSide(
-            width: 0.6,
-            style: pw.BorderStyle.dashed,
-            color: grey,
-          ),
-        ),
-      ),
-    );
-
-    pw.TextStyle sty({
-      required pw.Font font,
-      double size = 10,
-      PdfColor? color,
-    }) => pw.TextStyle(font: font, fontSize: size, color: color);
-
-    final pdf = pw.Document();
-
-    pdf.addPage(pw.Page(
-      pageFormat: pageFormat,
-      build: (ctx) => pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-        children: [
-
-          // ── HEADER ──────────────────────────────────────────────────
-          pw.Center(
-            child: pw.Text('SmartDukan',
-                style: sty(font: bold, size: 18, color: black)),
-          ),
-          pw.SizedBox(height: 3),
-          pw.Center(
-            child: pw.Text(fixDevanagariMatra('दुकानदार सहायक'),
-                style: sty(font: devaRegular, size: 10, color: grey)),
-          ),
-          pw.SizedBox(height: 10),
-          dashedLine(),
-
-          // ── BILL INFO ────────────────────────────────────────────────
-          pw.SizedBox(height: 6),
-          pw.RichText(
-            text: pw.TextSpan(children: [
-              pw.TextSpan(text: fixDevanagariMatra('दिनांक: '),
-                  style: sty(font: devaBold, size: 11)),
-              pw.TextSpan(text: DateFormat('d/M/yyyy').format(DateTime.now()),
-                  style: sty(font: regular, size: 11)),
-            ]),
-          ),
-          if (_customerName.isNotEmpty) ...[
-            pw.SizedBox(height: 4),
-            pw.RichText(
-              text: pw.TextSpan(children: [
-                pw.TextSpan(text: fixDevanagariMatra('ग्राहक: '),
-                    style: sty(font: devaBold, size: 11)),
-                pw.TextSpan(text: fixDevanagariMatra(_customerName),
-                    style: sty(font: regular, size: 11)),
-              ]),
-            ),
-          ],
-          if (_isCredit) ...[
-            pw.SizedBox(height: 4),
-            pw.Text(fixDevanagariMatra('** उधार बिल **'),
-                style: sty(font: devaBold, size: 11, color: red)),
-          ],
-          pw.SizedBox(height: 10),
-
-          // ── TABLE HEADER — order: आइटम | मात्रा | इकाई | दर | कुल ──
-          pw.Row(children: [
-            pw.Expanded(flex: 5,
-                child: pw.Text(fixDevanagariMatra('आइटम'), style: sty(font: devaBold, size: 10))),
-            pw.SizedBox(width: 32,
-                child: pw.Text(fixDevanagariMatra('मात्रा'), textAlign: pw.TextAlign.center,
-                    style: sty(font: devaBold, size: 10))),
-            pw.SizedBox(width: 30,
-                child: pw.Text(fixDevanagariMatra('इकाई'), textAlign: pw.TextAlign.center,
-                    style: sty(font: devaBold, size: 10))),
-            pw.SizedBox(width: 30,
-                child: pw.Text('दर', textAlign: pw.TextAlign.right,
-                    style: sty(font: devaBold, size: 10))),
-            pw.SizedBox(width: 34,
-                child: pw.Text('कुल', textAlign: pw.TextAlign.right,
-                    style: sty(font: devaBold, size: 10))),
-          ]),
-          pw.SizedBox(height: 4),
-          pw.Divider(thickness: 0.8, color: black),
-
-          // ── ITEMS ────────────────────────────────────────────────────
-          ..._billItems.map((item) => pw.Padding(
-            padding: const pw.EdgeInsets.symmetric(vertical: 5),
-            child: pw.Row(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Expanded(flex: 5,
-                    child: pw.Text(fixDevanagariMatra(item.itemName),
-                        style: sty(font: regular, size: 10))),
-                pw.SizedBox(width: 32,
-                    child: pw.Text(
-                        item.quantity % 1 == 0
-                            ? item.quantity.toInt().toString()
-                            : item.quantity.toStringAsFixed(1),
-                        textAlign: pw.TextAlign.center,
-                        style: sty(font: regular, size: 10))),
-                pw.SizedBox(width: 30,
-                    child: pw.Text(fixDevanagariMatra(_getUnit(item)),
-                        textAlign: pw.TextAlign.center,
-                        style: sty(font: regular, size: 10))),
-                pw.SizedBox(width: 30,
-                    child: pw.Text(
-                        '₹${item.pricePerUnit % 1 == 0 ? item.pricePerUnit.toInt() : item.pricePerUnit.toStringAsFixed(1)}',
-                        textAlign: pw.TextAlign.right,
-                        style: sty(font: regular, size: 10))),
-                pw.SizedBox(width: 34,
-                    child: pw.Text(
-                        '₹${item.itemTotal % 1 == 0 ? item.itemTotal.toInt() : item.itemTotal.toStringAsFixed(0)}',
-                        textAlign: pw.TextAlign.right,
-                        style: sty(font: bold, size: 10))),
-              ],
-            ),
-          )),
-
-          pw.SizedBox(height: 4),
-          dashedLine(),
-
-          // ── SUMMARY ──────────────────────────────────────────────────
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Text(fixDevanagariMatra('उप-कुल राशि'), style: sty(font: devaRegular, size: 11)),
-              pw.Text('₹${_subTotal.toStringAsFixed(2)}',
-                  style: sty(font: regular, size: 11)),
-            ],
-          ),
-          if (_discount > 0) ...[
-            pw.SizedBox(height: 4),
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Text('छूट', style: sty(font: devaBold, size: 11, color: red)),
-                pw.Text('-₹${_discount.toStringAsFixed(2)}',
-                    style: sty(font: bold, size: 11, color: red)),
-              ],
-            ),
-          ],
-          dashedLine(),
-
-          // ── TOTAL ────────────────────────────────────────────────────
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Text(fixDevanagariMatra('कुल राशि'), style: sty(font: devaBold, size: 13)),
-              pw.Text('₹${_grandTotal.toStringAsFixed(2)}',
-                  style: sty(font: bold, size: 13)),
-            ],
-          ),
-
-          pw.SizedBox(height: 16),
-
-          // ── FOOTER ───────────────────────────────────────────────────
-          pw.Center(
-            child: pw.Text(fixDevanagariMatra('धन्यवाद! फिर पधारें।'),
-                style: sty(font: devaRegular, size: 10, color: grey)),
-          ),
-        ],
-      ),
-    ));
-
-    return pdf.save();
-  }
-
   Future<void> _downloadPdf() async {
-    final bytes = await _buildBillPdfBytes();
+    final bytes = await buildBillPdfBytes(
+      items: _billItems,
+      customerName: _customerName,
+      isCredit: _isCredit,
+      subTotal: _subTotal,
+      discount: _discount,
+      grandTotal: _grandTotal,
+    );
     await Printing.layoutPdf(onLayout: (_) async => bytes);
   }
 
   Future<void> _sharePdfOnWhatsApp() async {
-    final bytes = await _buildBillPdfBytes();
+    final bytes = await buildBillPdfBytes(
+      items: _billItems,
+      customerName: _customerName,
+      isCredit: _isCredit,
+      subTotal: _subTotal,
+      discount: _discount,
+      grandTotal: _grandTotal,
+    );
     await Printing.sharePdf(bytes: bytes, filename: 'bill.pdf');
   }
 

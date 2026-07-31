@@ -1,12 +1,10 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../models/models.dart';
 import '../services/supabase_service.dart';
 import '../theme.dart';
-import '../utils/devanagari.dart';
+import '../utils/bill_pdf.dart';
 
 class PastBillsScreen extends StatefulWidget {
   const PastBillsScreen({super.key});
@@ -251,72 +249,35 @@ class _BillDetailSheet extends StatelessWidget {
   String _fmt(double n) =>
       n >= 1000 ? '₹${(n / 1000).toStringAsFixed(1)}k' : '₹${n.toStringAsFixed(0)}';
 
-  Future<Uint8List> _buildPdfBytes() async {
-    // Noto Sans Devanagari is required to render Hindi text in the PDF —
-    // the default PDF fonts have no Devanagari glyphs.
-    final regular = await PdfGoogleFonts.notoSansRegular();
-    final bold = await PdfGoogleFonts.notoSansBold();
-    final devaRegular = await PdfGoogleFonts.notoSansDevanagariRegular();
-    final devaBold = await PdfGoogleFonts.notoSansDevanagariBold();
-
-    final pdf = pw.Document();
-    pdf.addPage(pw.Page(
-      build: (ctx) => pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Center(
-            child: pw.Text('SmartDukan',
-                style: pw.TextStyle(font: bold, fontWeight: pw.FontWeight.bold, fontSize: 18)),
-          ),
-          pw.Center(child: pw.Text('दुकानदार सहायक', style: pw.TextStyle(font: devaRegular, fontSize: 11))),
-          pw.SizedBox(height: 10),
-          pw.Divider(),
-          pw.Text(fixDevanagariMatra('दिनांक: ${DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt)}'),
-              style: pw.TextStyle(font: devaRegular)),
-          if (bill.customerName != null)
-            pw.Text(fixDevanagariMatra('ग्राहक: ${bill.customerName}'), style: pw.TextStyle(font: devaRegular)),
-          pw.Text(bill.isCredit ? 'भुगतान: उधार' : 'भुगतान: नकद', style: pw.TextStyle(font: devaRegular)),
-          pw.Divider(),
-          pw.Table(
-            border: pw.TableBorder.all(width: 0.5),
-            children: [
-              pw.TableRow(children: [
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('आइटम', style: pw.TextStyle(font: devaBold, fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('इकाई', style: pw.TextStyle(font: devaBold, fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('दर', style: pw.TextStyle(font: devaBold, fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('मात्रा', style: pw.TextStyle(font: devaBold, fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('कुल', style: pw.TextStyle(font: devaBold, fontWeight: pw.FontWeight.bold))),
-              ]),
-              ...bill.billDetails.map((item) => pw.TableRow(children: [
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text(fixDevanagariMatra(item['item_name'] ?? ''), style: pw.TextStyle(font: devaRegular))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text(fixDevanagariMatra(item['unit'] ?? '-'), style: pw.TextStyle(font: devaRegular))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('₹${item['price_per_unit'] ?? 0}', style: pw.TextStyle(font: regular))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('${item['quantity_billed'] ?? 0}', style: pw.TextStyle(font: regular))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('₹${item['item_total'] ?? 0}', style: pw.TextStyle(font: regular))),
-              ])),
-            ],
-          ),
-          pw.SizedBox(height: 8),
-          if ((bill.discountAmount ?? 0) > 0)
-            pw.Text('छूट: -₹${bill.discountAmount!.toStringAsFixed(2)}',
-                style: pw.TextStyle(font: devaRegular)),
-          pw.Text(fixDevanagariMatra('कुल राशि: ₹${bill.totalAmount.toStringAsFixed(2)}'),
-              style: pw.TextStyle(font: devaBold, fontWeight: pw.FontWeight.bold, fontSize: 14)),
-          pw.SizedBox(height: 16),
-          pw.Center(child: pw.Text(fixDevanagariMatra('धन्यवाद! फिर पधारें।'), style: pw.TextStyle(font: devaRegular))),
-        ],
-      ),
-    ));
-    return pdf.save();
-  }
-
   Future<void> _printPdf(BuildContext context) async {
-    final bytes = await _buildPdfBytes();
+    final items = bill.billDetails.map((d) => BillItem.fromMap(d)).toList();
+    final discount = bill.discountAmount ?? 0;
+    final subTotal = bill.totalAmount + discount;
+    final bytes = await buildBillPdfBytes(
+      items: items,
+      customerName: bill.customerName ?? '',
+      isCredit: bill.isCredit,
+      subTotal: subTotal,
+      discount: discount,
+      grandTotal: bill.totalAmount,
+      date: bill.createdAt,
+    );
     await Printing.layoutPdf(onLayout: (_) async => bytes);
   }
 
   Future<void> _sharePdfOnWhatsApp() async {
-    final bytes = await _buildPdfBytes();
+    final items = bill.billDetails.map((d) => BillItem.fromMap(d)).toList();
+    final discount = bill.discountAmount ?? 0;
+    final subTotal = bill.totalAmount + discount;
+    final bytes = await buildBillPdfBytes(
+      items: items,
+      customerName: bill.customerName ?? '',
+      isCredit: bill.isCredit,
+      subTotal: subTotal,
+      discount: discount,
+      grandTotal: bill.totalAmount,
+      date: bill.createdAt,
+    );
     await Printing.sharePdf(bytes: bytes, filename: 'bill.pdf');
   }
 
