@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../services/auth_service.dart';
 import '../services/supabase_service.dart';
 import '../theme.dart';
+import '../widgets/bill_card.dart';
 import 'past_bills_screen.dart';
 import 'profile_screen.dart';
 
@@ -563,57 +564,8 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        children: _recentBills.asMap().entries.map((entry) {
-          final i = entry.key;
-          final bill = entry.value;
-          return Column(
-            children: [
-              ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                title: Text(
-                  bill.customerName ?? 'नकद ग्राहक',
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: AppColors.textPrimary),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  '${_fmtDate(bill.createdAt)} · ${bill.billDetails.length} आइटम',
-                  style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
-                ),
-                trailing: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      _fmt(bill.totalAmount),
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 15,
-                        color: bill.isCredit ? AppColors.danger : AppColors.success,
-                      ),
-                    ),
-                    Text(
-                      bill.isCredit ? 'उधार' : 'नकद',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: bill.isCredit ? AppColors.danger : AppColors.success,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (i < _recentBills.length - 1)
-                Divider(height: 1, color: AppColors.bg),
-            ],
-          );
-        }).toList(),
-      ),
+    return Column(
+      children: _recentBills.map((bill) => BillCard(bill: bill)).toList(),
     );
   }
 }
