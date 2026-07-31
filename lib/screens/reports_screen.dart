@@ -611,7 +611,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    if (mounted) setState(() => _loading = true);
     try {
       final results = await Future.wait([
         SupabaseService.fetchCustomerLedger(widget.customer.name),
@@ -619,14 +619,16 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
       ]);
       final ledger = results[0] as List<Map<String, dynamic>>;
       final allBills = results[1] as List<Bill>;
-      setState(() {
+      if (mounted) setState(() {
         _ledger = ledger;
         _customerBills = allBills
             .where((b) => b.customerName == widget.customer.name)
             .toList();
       });
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('लोड नहीं हो सका: $e')));
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 

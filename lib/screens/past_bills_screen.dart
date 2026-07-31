@@ -29,9 +29,9 @@ class _PastBillsScreenState extends State<PastBillsScreen> {
       final bills = await SupabaseService.fetchPastBills();
       setState(() => _bills = bills);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('लोड नहीं हो सका: $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('लोड नहीं हो सका: $e')));
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 

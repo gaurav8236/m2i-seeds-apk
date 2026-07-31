@@ -64,16 +64,20 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   }
 
   Future<void> _loadData() async {
-    final results = await Future.wait([
-      SupabaseService.fetchStock(),
-      SupabaseService.fetchCustomerNames(),
-      DraftService.loadDrafts(),
-    ]);
-    setState(() {
-      _stockList = results[0] as List<StockItem>;
-      _customerNames = results[1] as List<String>;
-      _drafts = results[2] as List<DraftBill>;
-    });
+    try {
+      final results = await Future.wait([
+        SupabaseService.fetchStock(),
+        SupabaseService.fetchCustomerNames(),
+        DraftService.loadDrafts(),
+      ]);
+      if (mounted) setState(() {
+        _stockList = results[0] as List<StockItem>;
+        _customerNames = results[1] as List<String>;
+        _drafts = results[2] as List<DraftBill>;
+      });
+    } catch (_) {
+      if (mounted) _showSnack('डेटा लोड नहीं हो सका, दोबारा कोशिश करें');
+    }
   }
 
   Future<void> _autoSaveDraft() async {
@@ -328,10 +332,13 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   // ── VIEW 1: INPUT ───────────────────────────────────────────────────────────
 
   Widget _buildInput() {
-    return WillPopScope(
-      onWillPop: () async {
-        await _autoSaveDraft();
-        return true;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (!didPop) {
+          await _autoSaveDraft();
+          if (mounted) Navigator.pop(context);
+        }
       },
       child: _buildInputScaffold(),
     );
@@ -944,7 +951,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
           ),
         ),
       ),
-    );
+    ).whenComplete(controller.dispose);
   }
 
   Widget _discountSection() {

@@ -42,7 +42,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   ];
 
   Future<void> _finish() async {
-    await AuthService.markOnboardingComplete();
+    try {
+      await AuthService.markOnboardingComplete();
+    } catch (_) {}
     widget.onDone();
   }
 

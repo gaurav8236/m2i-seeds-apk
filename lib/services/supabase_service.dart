@@ -94,7 +94,7 @@ class SupabaseService {
 
     final response = await http.post(
       Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-checkout/'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'X-Api-Key': SupabaseConfig.apiSecret},
       body: jsonEncode({
         'user_id': userId,
         'total_bill_amount': totalAmount,
@@ -282,7 +282,7 @@ class SupabaseService {
 
     final response = await http.post(
       Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-checkout/'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'X-Api-Key': SupabaseConfig.apiSecret},
       body: jsonEncode({
         'user_id': userId,
         'total_bill_amount': amount,

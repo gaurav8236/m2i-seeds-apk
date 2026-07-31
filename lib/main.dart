@@ -49,6 +49,12 @@ class AuthGate extends StatefulWidget {
 class _AuthGateState extends State<AuthGate> {
   bool? _seenOnboarding;
 
+  @override
+  void initState() {
+    super.initState();
+    _checkOnboarding();
+  }
+
   Future<void> _checkOnboarding() async {
     final seen = await AuthService.hasSeenOnboarding();
     if (mounted) setState(() => _seenOnboarding = seen);
@@ -65,7 +71,6 @@ class _AuthGateState extends State<AuthGate> {
         AuthService.ensureUserRow();
 
         if (_seenOnboarding == null) {
-          _checkOnboarding();
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );

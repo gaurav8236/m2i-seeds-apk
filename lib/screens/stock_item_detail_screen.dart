@@ -48,15 +48,19 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
 
   Future<void> _loadInsights() async {
     if (widget.item.id.isEmpty) return;
-    final results = await Future.wait([
-      SupabaseService.fetchItemSalesThisMonth(widget.item.id),
-      SupabaseService.fetchLastRestock(widget.item.id),
-    ]);
-    setState(() {
-      _soldThisMonth = results[0] as double;
-      _lastRestock = results[1] as StockHistoryEntry?;
-      _insightsLoading = false;
-    });
+    try {
+      final results = await Future.wait([
+        SupabaseService.fetchItemSalesThisMonth(widget.item.id),
+        SupabaseService.fetchLastRestock(widget.item.id),
+      ]);
+      if (mounted) setState(() {
+        _soldThisMonth = results[0] as double;
+        _lastRestock = results[1] as StockHistoryEntry?;
+        _insightsLoading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _insightsLoading = false);
+    }
   }
 
   Future<void> _save() async {
