@@ -745,6 +745,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                       openingBalance:
                           double.tryParse(balCtrl.text) ?? 0,
                     );
+                    if (!mounted) return;
                     setState(() {
                       _customer = Customer(
                         id: _customer.id,
@@ -759,10 +760,8 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                         lastPurchaseAt: _customer.lastPurchaseAt,
                       );
                     });
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('जानकारी अपडेट हो गई')));
-                    }
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('जानकारी अपडेट हो गई')));
                   } catch (e) {
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
