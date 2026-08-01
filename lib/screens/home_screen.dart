@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/auth_service.dart';
 import '../services/supabase_service.dart';
@@ -116,8 +115,6 @@ class _HomeScreenState extends State<HomeScreen> {
   String _fmt(double n) =>
       n >= 1000 ? '₹${(n / 1000).toStringAsFixed(1)}k' : '₹${n.toStringAsFixed(0)}';
 
-  String _fmtDate(DateTime d) =>
-      DateFormat('dd MMM, hh:mm a').format(d);
 
   @override
   Widget build(BuildContext context) {

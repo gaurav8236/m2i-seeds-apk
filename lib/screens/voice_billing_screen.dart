@@ -878,33 +878,6 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
     );
   }
 
-  Widget _stepper(double value, ValueChanged<double> onChange) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        _stepBtn('-', () => onChange((value - 1).clamp(0, double.infinity))),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Text(value % 1 == 0 ? value.toInt().toString() : value.toStringAsFixed(1),
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
-        ),
-        _stepBtn('+', () => onChange(value + 1)),
-      ],
-    );
-  }
-
-  Widget _stepBtn(String label, VoidCallback onTap) => GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 22, height: 22,
-          decoration: BoxDecoration(
-            border: Border.all(color: AppColors.border),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Center(child: Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textSecondary))),
-        ),
-      );
-
   void _showItemPicker(int index) {
     final controller = TextEditingController(text: _billItems[index].itemName);
     showModalBottomSheet(
