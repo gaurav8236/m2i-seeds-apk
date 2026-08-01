@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'screens/home_screen.dart';
 import 'screens/voice_billing_screen.dart';
 import 'screens/inventory_screen.dart';
@@ -14,6 +15,7 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _currentIndex = 0;
+  DateTime? _lastBackPress;
 
   // Each screen registers its reload fn here
   final Map<int, VoidCallback> _reloaders = {};
@@ -30,10 +32,38 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  void _onBackPressed() {
+    if (_currentIndex != 0) {
+      // On any non-home tab — go to Home
+      _changeTab(0);
+      return;
+    }
+    // On Home tab — require double-back to exit
+    final now = DateTime.now();
+    if (_lastBackPress == null ||
+        now.difference(_lastBackPress!) > const Duration(seconds: 2)) {
+      _lastBackPress = now;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('बाहर निकलने के लिए फिर से दबाएं'),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } else {
+      SystemNavigator.pop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: IndexedStack(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _onBackPressed();
+      },
+      child: Scaffold(
+        body: IndexedStack(
         index: _currentIndex,
         children: [
           HomeScreen(
@@ -81,6 +111,7 @@ class _AppShellState extends State<AppShell> {
             label: 'खाता',
           ),
         ],
+      ),
       ),
     );
   }
