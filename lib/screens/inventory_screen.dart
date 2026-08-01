@@ -66,15 +66,16 @@ class _InventoryScreenState extends State<InventoryScreen>
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    if (mounted) setState(() => _loading = true);
     try {
       final stock  = await SupabaseService.fetchStock();
       final master = await SupabaseService.fetchMasterInventory();
+      if (!mounted) return;
       setState(() { _stock = stock; _masterInventory = master; });
     } catch (e) {
-      _snack('लोड नहीं हो सका: $e');
+      if (mounted) _snack('लोड नहीं हो सका: $e');
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -185,14 +186,16 @@ class _InventoryScreenState extends State<InventoryScreen>
     setState(() => _submitting = true);
     try {
       await SupabaseService.upsertInventoryItems(List.from(_preview));
+      if (!mounted) return;
       setState(() => _preview.clear());
       await _load();
+      if (!mounted) return;
       _tabCtrl.animateTo(1);
       _snack('सभी आइटम सफलतापूर्वक जोड़े गए!');
     } catch (e) {
-      _snack('सेव नहीं हो सका: $e');
+      if (mounted) _snack('सेव नहीं हो सका: $e');
     } finally {
-      setState(() => _submitting = false);
+      if (mounted) setState(() => _submitting = false);
     }
   }
 

@@ -32,6 +32,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _load() async {
     final profile = await AuthService.fetchProfile();
+    if (!mounted) return;
     setState(() {
       _avatarUrl = profile['photo_url'];
       _email = profile['email'];

@@ -6,7 +6,7 @@ import '../supabase_config.dart';
 import 'auth_service.dart';
 
 class VoiceService {
-  static final _recorder = AudioRecorder();
+  static AudioRecorder _recorder = AudioRecorder();
 
   static Future<bool> hasPermission() async {
     return await _recorder.hasPermission();
@@ -69,5 +69,6 @@ class VoiceService {
 
   static void dispose() {
     _recorder.dispose();
+    _recorder = AudioRecorder();
   }
 }

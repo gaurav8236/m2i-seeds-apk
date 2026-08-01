@@ -97,17 +97,19 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
     if (picked != null) {
+      if (!mounted) return;
       setState(() => _period = StatsPeriod.custom);
       setState(() => _loading = true);
       try {
         final stats = await SupabaseService.fetchFilteredStats(
             from: picked.start, to: picked.end);
+        if (!mounted) return;
         setState(() {
           _credit = stats['credit'] ?? 0;
           _paid = stats['paid'] ?? 0;
         });
       } finally {
-        setState(() => _loading = false);
+        if (mounted) setState(() => _loading = false);
       }
     }
   }

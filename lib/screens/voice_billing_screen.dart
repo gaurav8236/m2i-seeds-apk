@@ -216,27 +216,35 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   }
 
   Future<void> _downloadPdf() async {
-    final bytes = await buildBillPdfBytes(
-      items: _billItems,
-      customerName: _customerName,
-      isCredit: _isCredit,
-      subTotal: _subTotal,
-      discount: _discount,
-      grandTotal: _grandTotal,
-    );
-    await Printing.layoutPdf(onLayout: (_) async => bytes);
+    try {
+      final bytes = await buildBillPdfBytes(
+        items: _billItems,
+        customerName: _customerName,
+        isCredit: _isCredit,
+        subTotal: _subTotal,
+        discount: _discount,
+        grandTotal: _grandTotal,
+      );
+      await Printing.layoutPdf(onLayout: (_) async => bytes);
+    } catch (e) {
+      if (mounted) _showSnack('PDF डाउनलोड में त्रुटि: $e');
+    }
   }
 
   Future<void> _sharePdfOnWhatsApp() async {
-    final bytes = await buildBillPdfBytes(
-      items: _billItems,
-      customerName: _customerName,
-      isCredit: _isCredit,
-      subTotal: _subTotal,
-      discount: _discount,
-      grandTotal: _grandTotal,
-    );
-    await Printing.sharePdf(bytes: bytes, filename: 'bill.pdf');
+    try {
+      final bytes = await buildBillPdfBytes(
+        items: _billItems,
+        customerName: _customerName,
+        isCredit: _isCredit,
+        subTotal: _subTotal,
+        discount: _discount,
+        grandTotal: _grandTotal,
+      );
+      await Printing.sharePdf(bytes: bytes, filename: 'bill.pdf');
+    } catch (e) {
+      if (mounted) _showSnack('PDF शेयर में त्रुटि: $e');
+    }
   }
 
   void _resetBill() {
@@ -258,6 +266,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
         builder: (_) => RecordingScreen(stockList: _stockList),
       ),
     );
+    if (!mounted) return;
     if (results != null && results.isNotEmpty) {
       setState(() => _billItems = results);
     }
@@ -337,7 +346,6 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
       onPopInvokedWithResult: (didPop, _) async {
         if (!didPop) {
           await _autoSaveDraft();
-          if (mounted) Navigator.pop(context);
         }
       },
       child: _buildInputScaffold(),

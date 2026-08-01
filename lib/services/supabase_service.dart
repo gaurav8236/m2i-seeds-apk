@@ -186,7 +186,8 @@ class SupabaseService {
     // Aggregate bill amounts + last purchase date per customer name
     final Map<String, Map<String, dynamic>> agg = {};
     for (final bill in (billRes as List)) {
-      final name = bill['customer_name'] as String;
+      final name = bill['customer_name']?.toString() ?? '';
+      if (name.isEmpty) continue;
       agg.putIfAbsent(name, () => {'credit': 0.0, 'paid': 0.0, 'lastDate': null});
       final amt = (bill['total_amount'] as num?)?.toDouble() ?? 0;
       if (bill['is_credit'] == true) {
