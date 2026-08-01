@@ -244,9 +244,9 @@ class _InventoryScreenState extends State<InventoryScreen>
               Container(
                 width: 36, height: 36,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.18),
+                  color: Colors.white.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.white.withOpacity(0.25)),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
                 ),
                 child: const Icon(Icons.inventory_2, color: Colors.white, size: 18),
               ),
@@ -264,7 +264,7 @@ class _InventoryScreenState extends State<InventoryScreen>
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.15),
+                color: Colors.white.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: TabBar(
@@ -314,7 +314,7 @@ class _InventoryScreenState extends State<InventoryScreen>
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
       ),
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -339,7 +339,7 @@ class _InventoryScreenState extends State<InventoryScreen>
               color: Colors.white,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: AppColors.border),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8)],
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 8)],
             ),
             child: ListView(
               shrinkWrap: true,
@@ -459,7 +459,7 @@ class _InventoryScreenState extends State<InventoryScreen>
               decoration: BoxDecoration(
                 color: AppColors.primaryLight,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+                border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
               ),
               child: const Icon(Icons.add, color: AppColors.primary, size: 20),
             ),
@@ -497,7 +497,7 @@ class _InventoryScreenState extends State<InventoryScreen>
             decoration: BoxDecoration(
               color: AppColors.primaryLight,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+              border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
             ),
             child: Text(
               '${_lowStockLimit.toInt()} ${_unitCtrl.text.isNotEmpty ? _unitCtrl.text : 'इकाई'}',
@@ -775,7 +775,7 @@ class _InventoryScreenState extends State<InventoryScreen>
           border: Border.all(color: active ? AppColors.primary : AppColors.border),
           boxShadow: active
               ? [BoxShadow(
-                  color: AppColors.primary.withOpacity(0.25), blurRadius: 8)]
+                  color: AppColors.primary.withValues(alpha: 0.25), blurRadius: 8)]
               : null,
         ),
         child: Text(label,

@@ -108,7 +108,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.arrow_back, color: Colors.white),
                     style: IconButton.styleFrom(
-                      backgroundColor: Colors.white.withOpacity(0.2),
+                      backgroundColor: Colors.white.withValues(alpha: 0.2),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                   ),
@@ -125,8 +125,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   width: 72, height: 72,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.white.withOpacity(0.2),
-                    border: Border.all(color: Colors.white.withOpacity(0.4), width: 2),
+                    color: Colors.white.withValues(alpha: 0.2),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 2),
                     image: _avatarUrl != null
                         ? DecorationImage(
                             image: NetworkImage(_avatarUrl!), fit: BoxFit.cover)
@@ -154,7 +154,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 if (_email != null)
                   Text(_email!,
                       style: TextStyle(
-                          color: Colors.white.withOpacity(0.8), fontSize: 12)),
+                          color: Colors.white.withValues(alpha: 0.8), fontSize: 12)),
               ]),
             ),
           ),

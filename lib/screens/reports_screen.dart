@@ -149,7 +149,7 @@ class _ReportsScreenState extends State<ReportsScreen>
                   Container(
                     width: 32, height: 32,
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
+                      color: Colors.white.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Icon(Icons.menu_book, color: Colors.white, size: 17),
@@ -231,10 +231,10 @@ class _ReportsScreenState extends State<ReportsScreen>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
         decoration: BoxDecoration(
-          color: active ? Colors.white : Colors.white.withOpacity(0.15),
+          color: active ? Colors.white : Colors.white.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-              color: Colors.white.withOpacity(active ? 0 : 0.3)),
+              color: Colors.white.withValues(alpha: active ? 0 : 0.3)),
         ),
         child: Text(label,
             style: TextStyle(
@@ -251,10 +251,10 @@ class _ReportsScreenState extends State<ReportsScreen>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
         decoration: BoxDecoration(
-          color: active ? Colors.white : Colors.white.withOpacity(0.15),
+          color: active ? Colors.white : Colors.white.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-              color: Colors.white.withOpacity(active ? 0 : 0.3)),
+              color: Colors.white.withValues(alpha: active ? 0 : 0.3)),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.date_range, size: 12,
@@ -284,7 +284,7 @@ class _ReportsScreenState extends State<ReportsScreen>
 
   Widget _vDivider() => Container(
         height: 32, width: 1,
-        color: Colors.white.withOpacity(0.2),
+        color: Colors.white.withValues(alpha: 0.2),
         margin: const EdgeInsets.symmetric(horizontal: 8));
 
   // ── CUSTOMER TAB ─────────────────────────────────────────────────────────────
@@ -688,7 +688,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.arrow_back, color: Colors.white),
                     style: IconButton.styleFrom(
-                      backgroundColor: Colors.white.withOpacity(0.2),
+                      backgroundColor: Colors.white.withValues(alpha: 0.2),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8)),
                     ),
@@ -708,10 +708,10 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.12),
+                    color: Colors.white.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                        color: Colors.white.withOpacity(0.2)),
+                        color: Colors.white.withValues(alpha: 0.2)),
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,

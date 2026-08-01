@@ -33,7 +33,7 @@ final ThemeData appTheme = ThemeData(
     seedColor: AppColors.primary,
     primary: AppColors.primary,
     surface: AppColors.surface,
-    background: AppColors.bg,
+    surfaceContainerLowest: AppColors.bg,
   ),
   scaffoldBackgroundColor: AppColors.bg,
   appBarTheme: const AppBarTheme(

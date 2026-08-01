@@ -279,7 +279,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.primary.withOpacity(0.4), width: 1.5,
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.4), width: 1.5,
             style: BorderStyle.solid),
       ),
       child: Column(children: [
@@ -365,7 +365,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                 bottomLeft: Radius.circular(20),
                 bottomRight: Radius.circular(20),
               ),
-              boxShadow: [BoxShadow(color: const Color(0xFF0D47A1).withOpacity(0.25), blurRadius: 16, offset: const Offset(0, 4))],
+              boxShadow: [BoxShadow(color: const Color(0xFF0D47A1).withValues(alpha: 0.25), blurRadius: 16, offset: const Offset(0, 4))],
             ),
             child: SafeArea(
               bottom: false,
@@ -379,9 +379,9 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                         Container(
                           width: 32, height: 32,
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
+                            color: Colors.white.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.white.withOpacity(0.3)),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
                           ),
                           child: const Icon(Icons.receipt_long, color: Colors.white, size: 17),
                         ),
@@ -412,15 +412,15 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.12),
+                        color: Colors.white.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white.withOpacity(0.2)),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text('कुल राशि',
-                              style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 12, fontWeight: FontWeight.w600)),
+                              style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12, fontWeight: FontWeight.w600)),
                           Text('₹${_grandTotal.toStringAsFixed(0)}',
                               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 22, letterSpacing: -0.5)),
                         ],
@@ -476,7 +476,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: AppColors.border),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -568,7 +568,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
       ),
       child: Column(
         children: [
@@ -792,7 +792,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                   decoration: BoxDecoration(
                     color: AppColors.bg,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppColors.primary.withOpacity(0.4)),
+                    border: Border.all(color: AppColors.primary.withValues(alpha: 0.4)),
                   ),
                   child: Center(
                     child: Text(
@@ -1046,7 +1046,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                       onPressed: () => setState(() => _view = BillingView.input),
                       icon: const Icon(Icons.arrow_back, color: Colors.white),
                       style: IconButton.styleFrom(
-                        backgroundColor: Colors.white.withOpacity(0.2),
+                        backgroundColor: Colors.white.withValues(alpha: 0.2),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                     ),
@@ -1060,9 +1060,9 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.12),
+                      color: Colors.white.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withOpacity(0.2)),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
                     ),
                     child: Column(children: [
                       const Text('कुल राशि', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
@@ -1151,7 +1151,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                         Switch(
                           value: _isCredit,
                           onChanged: (v) => setState(() => _isCredit = v),
-                          activeColor: AppColors.primary,
+                          activeThumbColor: AppColors.primary,
                         ),
                       ],
                     ),
@@ -1264,8 +1264,8 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                     width: 72, height: 72,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.2),
-                      border: Border.all(color: Colors.white.withOpacity(0.4), width: 2),
+                      color: Colors.white.withValues(alpha: 0.2),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 2),
                     ),
                     child: const Icon(Icons.check_circle_outline, color: Colors.white, size: 38),
                   ),
@@ -1279,9 +1279,9 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.12),
+                      color: Colors.white.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: Colors.white.withOpacity(0.2)),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
                     ),
                     child: Column(children: [
                       const Text('कुल राशि', style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600)),
@@ -1291,7 +1291,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                         const SizedBox(height: 4),
                         Text(
                           '${_isCredit ? "🔴 उधार" : "🟢 नकद"} — $_customerName',
-                          style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 13),
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13),
                         ),
                       ],
                     ]),

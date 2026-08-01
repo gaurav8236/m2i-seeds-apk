@@ -49,9 +49,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   width: 80,
                   height: 80,
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.15),
+                    color: Colors.white.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(22),
-                    border: Border.all(color: Colors.white.withOpacity(0.3), width: 1.5),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 1.5),
                   ),
                   child: const Icon(Icons.mic, color: Colors.white, size: 40),
                 ),
@@ -70,7 +70,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 Text(
                   'दुकानदार सहायक',
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.8),
+                    color: Colors.white.withValues(alpha: 0.8),
                     fontSize: 16,
                     fontWeight: FontWeight.w500,
                   ),
@@ -80,7 +80,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   'आवाज़ से बिल बनाएं · स्टॉक संभालें · खाता देखें',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.6),
+                    color: Colors.white.withValues(alpha: 0.6),
                     fontSize: 12,
                   ),
                 ),
@@ -107,7 +107,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             borderRadius: BorderRadius.circular(14),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.18),
+                                color: Colors.black.withValues(alpha: 0.18),
                                 blurRadius: 20,
                                 offset: const Offset(0, 6),
                               ),
@@ -136,7 +136,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   'आपका डेटा सुरक्षित है — केवल आपके खाते से जुड़ा रहेगा',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.55),
+                    color: Colors.white.withValues(alpha: 0.55),
                     fontSize: 11,
                   ),
                 ),

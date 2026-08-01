@@ -159,7 +159,7 @@ class _RecordingScreenState extends State<RecordingScreen>
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: Border.all(
-                color: AppColors.danger.withOpacity((1 - t) * 0.4),
+                color: AppColors.danger.withValues(alpha: (1 - t) * 0.4),
                 width: 2.5,
               ),
             ),
@@ -230,7 +230,7 @@ class _RecordingScreenState extends State<RecordingScreen>
                           color: (_isRecording
                                   ? AppColors.danger
                                   : AppColors.primary)
-                              .withOpacity(_isRecording ? 0.5 : 0.3),
+                              .withValues(alpha: _isRecording ? 0.5 : 0.3),
                           blurRadius: 32,
                           offset: const Offset(0, 8),
                         ),
