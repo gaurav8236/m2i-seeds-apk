@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/home_screen.dart';
 import 'screens/voice_billing_screen.dart';
 import 'screens/inventory_screen.dart';
@@ -17,8 +18,24 @@ class _AppShellState extends State<AppShell> {
   int _currentIndex = 0;
   DateTime? _lastBackPress;
 
+  static const _tabKey = 'active_tab';
+
   // Each screen registers its reload fn here
   final Map<int, VoidCallback> _reloaders = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreTab();
+  }
+
+  Future<void> _restoreTab() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getInt(_tabKey) ?? 0;
+    if (mounted && saved != 0) {
+      setState(() => _currentIndex = saved);
+    }
+  }
 
   void _registerReload(int tabIndex, VoidCallback fn) {
     _reloaders[tabIndex] = fn;
@@ -26,6 +43,9 @@ class _AppShellState extends State<AppShell> {
 
   void _changeTab(int index) {
     setState(() => _currentIndex = index);
+    // Fire-and-forget — no need to await, write completes in background
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setInt(_tabKey, index));
     // Refresh the screen we're switching TO (skip VoiceBillingScreen tab 1)
     if (index != 1) {
       _reloaders[index]?.call();
@@ -64,54 +84,56 @@ class _AppShellState extends State<AppShell> {
       },
       child: Scaffold(
         body: IndexedStack(
-        index: _currentIndex,
-        children: [
-          HomeScreen(
-            onTabChange: _changeTab,
-            onRegisterReload: (fn) => _registerReload(0, fn),
-          ),
-          const VoiceBillingScreen(),
-          InventoryScreen(
-            onRegisterReload: (fn) => _registerReload(2, fn),
-          ),
-          ReportsScreen(
-            onRegisterReload: (fn) => _registerReload(3, fn),
-          ),
-        ],
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: _changeTab,
-        selectedItemColor: AppColors.primary,
-        unselectedItemColor: AppColors.textMuted,
-        backgroundColor: Colors.white,
-        type: BottomNavigationBarType.fixed,
-        elevation: 12,
-        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 11),
-        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 11),
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'होम',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.mic_outlined),
-            activeIcon: Icon(Icons.mic),
-            label: 'बिक्री',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.inventory_2_outlined),
-            activeIcon: Icon(Icons.inventory_2),
-            label: 'स्टॉक',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.menu_book_outlined),
-            activeIcon: Icon(Icons.menu_book),
-            label: 'खाता',
-          ),
-        ],
-      ),
+          index: _currentIndex,
+          children: [
+            HomeScreen(
+              onTabChange: _changeTab,
+              onRegisterReload: (fn) => _registerReload(0, fn),
+            ),
+            const VoiceBillingScreen(),
+            InventoryScreen(
+              onRegisterReload: (fn) => _registerReload(2, fn),
+            ),
+            ReportsScreen(
+              onRegisterReload: (fn) => _registerReload(3, fn),
+            ),
+          ],
+        ),
+        bottomNavigationBar: BottomNavigationBar(
+          currentIndex: _currentIndex,
+          onTap: _changeTab,
+          selectedItemColor: AppColors.primary,
+          unselectedItemColor: AppColors.textMuted,
+          backgroundColor: Colors.white,
+          type: BottomNavigationBarType.fixed,
+          elevation: 12,
+          selectedLabelStyle:
+              const TextStyle(fontWeight: FontWeight.w700, fontSize: 11),
+          unselectedLabelStyle:
+              const TextStyle(fontWeight: FontWeight.w500, fontSize: 11),
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.home_outlined),
+              activeIcon: Icon(Icons.home),
+              label: 'होम',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.mic_outlined),
+              activeIcon: Icon(Icons.mic),
+              label: 'बिक्री',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.inventory_2_outlined),
+              activeIcon: Icon(Icons.inventory_2),
+              label: 'स्टॉक',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.menu_book_outlined),
+              activeIcon: Icon(Icons.menu_book),
+              label: 'खाता',
+            ),
+          ],
+        ),
       ),
     );
   }
