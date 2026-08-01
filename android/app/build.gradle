@@ -42,7 +42,7 @@ android {
 
     defaultConfig {
         applicationId "com.smartdukan.app"
-        minSdkVersion flutter.minSdkVersion
+        minSdkVersion 25
         targetSdkVersion flutter.targetSdkVersion
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
