@@ -10,7 +10,8 @@ import 'profile_screen.dart';
 class HomeScreen extends StatefulWidget {
   final void Function(int) onTabChange;
   final void Function(VoidCallback) onRegisterReload;
-  const HomeScreen({super.key, required this.onTabChange, required this.onRegisterReload});
+  final VoidCallback? onLowStockTap;
+  const HomeScreen({super.key, required this.onTabChange, required this.onRegisterReload, this.onLowStockTap});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -422,7 +423,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _lowStockBanner() {
     return GestureDetector(
-      onTap: () => widget.onTabChange(2),
+      onTap: () {
+        widget.onTabChange(2);
+        widget.onLowStockTap?.call();
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(

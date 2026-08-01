@@ -27,6 +27,7 @@ class _ReportsScreenState extends State<ReportsScreen>
 
   // Customers
   List<Customer> _customers = [];
+  String _customerSearch = '';
 
   // Reports
   List<Bill> _allBills = [];
@@ -186,22 +187,47 @@ class _ReportsScreenState extends State<ReportsScreen>
                   _vDivider(),
                   Expanded(child: _headerStat('नकद जमा', _fmt(_paid))),
                   _vDivider(),
-                  Expanded(child: _headerStat('कुल बकाया', _fmt(_outstanding))),
+                  Expanded(child: _headerStat('कुल बकाया*', _fmt(_outstanding))),
                 ]),
-                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Text('* सभी समय का बकाया',
+                        style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.55),
+                            fontSize: 9)),
+                  ),
+                ),
+                const SizedBox(height: 8),
 
-                TabBar(
-                  controller: _tabController,
-                  labelColor: Colors.white,
-                  unselectedLabelColor: Colors.white54,
-                  indicatorColor: Colors.white,
-                  indicatorWeight: 2.5,
-                  labelStyle: const TextStyle(
-                      fontWeight: FontWeight.w700, fontSize: 13),
-                  tabs: const [
-                    Tab(text: 'ग्राहक खाता'),
-                    Tab(text: 'रिपोर्ट'),
-                  ],
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(0, 0, 0, 2),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: TabBar(
+                      controller: _tabController,
+                      indicator: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      indicatorSize: TabBarIndicatorSize.tab,
+                      labelColor: AppColors.primary,
+                      unselectedLabelColor: Colors.white,
+                      labelStyle: const TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 13),
+                      unselectedLabelStyle: const TextStyle(
+                          fontWeight: FontWeight.w500, fontSize: 13),
+                      dividerColor: Colors.transparent,
+                      tabs: const [
+                        Tab(text: 'ग्राहक खाता'),
+                        Tab(text: 'रिपोर्ट'),
+                      ],
+                    ),
+                  ),
                 ),
               ]),
             ),
@@ -358,14 +384,38 @@ class _ReportsScreenState extends State<ReportsScreen>
               ),
             ),
           )
-        else
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              itemCount: _customers.length,
-              itemBuilder: (_, i) => _customerRow(_customers[i]),
+        else ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: TextField(
+              onChanged: (v) => setState(() => _customerSearch = v),
+              decoration: const InputDecoration(
+                hintText: 'ग्राहक खोजें...',
+                prefixIcon: Icon(Icons.search, size: 18),
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
             ),
           ),
+          Expanded(
+            child: Builder(builder: (_) {
+              final filtered = _customerSearch.isEmpty
+                  ? _customers
+                  : _customers.where((c) => c.name.toLowerCase().contains(_customerSearch.toLowerCase())).toList();
+              if (filtered.isEmpty) {
+                return const Center(
+                  child: Text('कोई ग्राहक नहीं मिला',
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                );
+              }
+              return ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                itemCount: filtered.length,
+                itemBuilder: (_, i) => _customerRow(filtered[i]),
+              );
+            }),
+          ),
+        ],
       ]),
     );
   }
@@ -597,10 +647,12 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
   List<Bill> _customerBills = [];
   final _payCtrl = TextEditingController();
   bool _paying = false;
+  late Customer _customer;
 
   @override
   void initState() {
     super.initState();
+    _customer = widget.customer;
     _load();
   }
 
@@ -614,7 +666,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
     if (mounted) setState(() => _loading = true);
     try {
       final results = await Future.wait([
-        SupabaseService.fetchCustomerLedger(widget.customer.name),
+        SupabaseService.fetchCustomerLedger(_customer.name),
         SupabaseService.fetchPastBills(),
       ]);
       final ledger = results[0] as List<Map<String, dynamic>>;
@@ -622,7 +674,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
       if (mounted) setState(() {
         _ledger = ledger;
         _customerBills = allBills
-            .where((b) => b.customerName == widget.customer.name)
+            .where((b) => b.customerName == _customer.name)
             .toList();
       });
     } catch (e) {
@@ -630,6 +682,112 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _showEditSheet() {
+    final nameCtrl = TextEditingController(text: _customer.name);
+    final phoneCtrl = TextEditingController(text: _customer.phone ?? '');
+    final balCtrl = TextEditingController(
+        text: _customer.openingBalance > 0
+            ? _customer.openingBalance.toStringAsFixed(0)
+            : '');
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                  color: AppColors.border, borderRadius: BorderRadius.circular(2)),
+            ),
+            const Text('ग्राहक जानकारी बदलें',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(labelText: 'नाम'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: phoneCtrl,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                  labelText: 'मोबाइल नंबर', prefixText: '+91 '),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: balCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                  labelText: 'शुरुआती बकाया (₹)', prefixText: '₹ '),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  try {
+                    await SupabaseService.updateCustomer(
+                      id: _customer.id,
+                      name: nameCtrl.text.trim(),
+                      phone: phoneCtrl.text.trim().isEmpty
+                          ? null
+                          : phoneCtrl.text.trim(),
+                      openingBalance:
+                          double.tryParse(balCtrl.text) ?? 0,
+                    );
+                    setState(() {
+                      _customer = Customer(
+                        id: _customer.id,
+                        name: nameCtrl.text.trim(),
+                        phone: phoneCtrl.text.trim().isEmpty
+                            ? null
+                            : phoneCtrl.text.trim(),
+                        openingBalance:
+                            double.tryParse(balCtrl.text) ?? 0,
+                        createdAt: _customer.createdAt,
+                        outstanding: _customer.outstanding,
+                        lastPurchaseAt: _customer.lastPurchaseAt,
+                      );
+                    });
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('जानकारी अपडेट हो गई')));
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('अपडेट नहीं हो सका: $e')));
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('सहेजें',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ]),
+        ),
+      ),
+    ).whenComplete(() {
+      nameCtrl.dispose();
+      phoneCtrl.dispose();
+      balCtrl.dispose();
+    });
   }
 
   double get _outstanding {
@@ -645,7 +803,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
     setState(() => _paying = true);
     try {
       await SupabaseService.recordPayment(
-          customerName: widget.customer.name, amount: amt);
+          customerName: _customer.name, amount: amt);
       _payCtrl.clear();
       await _load();
       if (mounted) {
@@ -694,15 +852,42 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(widget.customer.name,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 16)),
-                    const Text('ग्राहक खाता',
-                        style: TextStyle(color: Colors.white70, fontSize: 11)),
-                  ]),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(_customer.name,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16)),
+                      Row(children: [
+                        if (_customer.phone != null && _customer.phone!.isNotEmpty) ...[
+                          const Icon(Icons.phone, color: Colors.white70, size: 11),
+                          const SizedBox(width: 3),
+                          Text(_customer.phone!,
+                              style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                          const SizedBox(width: 10),
+                        ],
+                        if (_customer.openingBalance > 0) ...[
+                          const Icon(Icons.account_balance_wallet_outlined, color: Colors.white70, size: 11),
+                          const SizedBox(width: 3),
+                          Text('शुरुआती: ₹${_customer.openingBalance.toStringAsFixed(0)}',
+                              style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                        ] else
+                          const Text('ग्राहक खाता',
+                              style: TextStyle(color: Colors.white70, fontSize: 11)),
+                      ]),
+                    ]),
+                  ),
+                  IconButton(
+                    onPressed: _showEditSheet,
+                    icon: const Icon(Icons.edit_outlined, color: Colors.white, size: 18),
+                    tooltip: 'जानकारी बदलें',
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.white.withValues(alpha: 0.2),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
                 ]),
                 const SizedBox(height: 16),
                 Container(

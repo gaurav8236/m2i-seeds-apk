@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../models/models.dart';
@@ -96,7 +97,18 @@ class _RecordingScreenState extends State<RecordingScreen>
 
     final path = await VoiceService.stopRecording();
     if (path == null) {
-      if (mounted) Navigator.pop(context);
+      if (mounted) _showRetryDialog('रिकॉर्डिंग नहीं हो सकी। दोबारा कोशिश करें।');
+      return;
+    }
+
+    // Check audio file size — very small = no speech recorded
+    final file = await Future.microtask(() {
+      try { return File(path); } catch (_) { return null; }
+    });
+    final fileSize = file != null ? await file.length() : 0;
+    if (fileSize < 4000) {
+      Analytics.voiceApiNoItems(reason: 'empty_audio');
+      if (mounted) _showRetryDialog('कोई आवाज़ नहीं मिली।\nमाइक के पास बोलें और दोबारा कोशिश करें।');
       return;
     }
 
@@ -106,21 +118,51 @@ class _RecordingScreenState extends State<RecordingScreen>
       final matched = items.length;
       if (matched == 0) {
         Analytics.voiceApiNoItems(reason: 'no_match');
-      } else {
-        Analytics.voiceApiSuccess(
-          itemsFound: results.length,
-          itemsMatched: matched,
-        );
+        if (mounted) _showRetryDialog('आपकी आवाज़ सुनी गई लेकिन कोई सामान नहीं पहचाना गया।\nस्पष्ट रूप से सामान का नाम बोलें।');
+        return;
       }
+      Analytics.voiceApiSuccess(itemsFound: results.length, itemsMatched: matched);
       if (mounted) Navigator.pop(context, items);
     } catch (e) {
       Analytics.voiceApiError(error: e.toString());
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('त्रुटि: $e')));
-        Navigator.pop(context);
-      }
+      if (mounted) _showRetryDialog('सर्वर से जुड़ने में समस्या हुई।\nइंटरनेट जांचें और दोबारा कोशिश करें।');
     }
+  }
+
+  void _showRetryDialog(String message) {
+    setState(() => _isProcessing = false);
+    showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(children: [
+          Icon(Icons.mic_off, color: Color(0xFFDC2626), size: 20),
+          SizedBox(width: 8),
+          Text('आवाज़ नहीं मिली', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        ]),
+        content: Text(message, style: const TextStyle(fontSize: 14, height: 1.5)),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        actions: [
+          OutlinedButton(
+            onPressed: () { Navigator.pop(ctx, false); Navigator.pop(context); },
+            child: const Text('वापस जाएं'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx, true);
+              setState(() { _isRecording = false; _isProcessing = false; });
+              _startRecording();
+            },
+            icon: const Icon(Icons.mic, size: 16),
+            label: const Text('दोबारा कोशिश करें'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1A56DB),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   List<BillItem> _processResults(List<Map<String, dynamic>> results) {

@@ -254,6 +254,25 @@ class SupabaseService {
     );
   }
 
+  static Future<void> updateCustomer({
+    required String id,
+    required String name,
+    String? phone,
+    required double openingBalance,
+  }) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Not authenticated');
+    await _client
+        .from('customers')
+        .update({
+          'name': name.trim(),
+          'phone': phone != null && phone.trim().isNotEmpty ? phone.trim() : null,
+          'opening_balance': openingBalance,
+        })
+        .eq('id', id)
+        .eq('user_id', userId);
+  }
+
   // ── Customer Ledger ────────────────────────────────────────────────────────
 
   static Future<List<Map<String, dynamic>>> fetchCustomerLedger(String customerName) async {

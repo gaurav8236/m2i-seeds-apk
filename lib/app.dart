@@ -22,6 +22,7 @@ class _AppShellState extends State<AppShell> {
 
   // Each screen registers its reload fn here
   final Map<int, VoidCallback> _reloaders = {};
+  VoidCallback? _lowStockTrigger;
 
   @override
   void initState() {
@@ -89,10 +90,12 @@ class _AppShellState extends State<AppShell> {
             HomeScreen(
               onTabChange: _changeTab,
               onRegisterReload: (fn) => _registerReload(0, fn),
+              onLowStockTap: () => _lowStockTrigger?.call(),
             ),
             const VoiceBillingScreen(),
             InventoryScreen(
               onRegisterReload: (fn) => _registerReload(2, fn),
+              onRegisterShowLowStock: (fn) => _lowStockTrigger = fn,
             ),
             ReportsScreen(
               onRegisterReload: (fn) => _registerReload(3, fn),

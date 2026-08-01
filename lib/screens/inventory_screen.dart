@@ -6,7 +6,8 @@ import 'stock_item_detail_screen.dart';
 
 class InventoryScreen extends StatefulWidget {
   final void Function(VoidCallback) onRegisterReload;
-  const InventoryScreen({super.key, required this.onRegisterReload});
+  final void Function(VoidCallback)? onRegisterShowLowStock;
+  const InventoryScreen({super.key, required this.onRegisterReload, this.onRegisterShowLowStock});
 
   @override
   State<InventoryScreen> createState() => _InventoryScreenState();
@@ -21,6 +22,9 @@ class _InventoryScreenState extends State<InventoryScreen>
   bool _loading = true;
 
   // ── Add form ───────────────────────────────────────────────────────────────
+  static const _kCategories = ['अनाज', 'दाल', 'तेल/घी', 'मसाले', 'आटा/सूजी', 'चीनी/नमक', 'बिस्कुट/नाश्ता', 'साबुन/सफाई', 'पेय पदार्थ', 'अन्य'];
+  static const _kUnits = ['किलो', 'ग्राम', 'लीटर', 'मिली', 'पैकेट', 'पीस', 'बोतल', 'थैला', 'दर्जन', 'अन्य'];
+
   final _nameCtrl     = TextEditingController();
   final _categoryCtrl = TextEditingController();
   final _unitCtrl     = TextEditingController();
@@ -29,6 +33,8 @@ class _InventoryScreenState extends State<InventoryScreen>
   final _aliasCtrl    = TextEditingController();
   final _nameFocus    = FocusNode();
   double _lowStockLimit = 10;
+  String? _selCategory;
+  String? _selUnit;
   List<String> _aliases = [];
   List<dynamic> _suggestions = [];
   bool _showSuggestions = false;
@@ -46,6 +52,10 @@ class _InventoryScreenState extends State<InventoryScreen>
   void initState() {
     super.initState();
     widget.onRegisterReload(_load);
+    widget.onRegisterShowLowStock?.call(() {
+      setState(() => _showLowOnly = true);
+      _tabCtrl.animateTo(1);
+    });
     _load();
     _nameCtrl.addListener(_onNameChanged);
   }
@@ -110,6 +120,8 @@ class _InventoryScreenState extends State<InventoryScreen>
       _lowStockLimit   = s.lowStockLimit;
       _aliases         = List.from(s.aliases);
       _showSuggestions = false;
+      _selCategory     = _kCategories.contains(s.category) ? s.category : (s.category.isNotEmpty ? 'अन्य' : null);
+      _selUnit         = _kUnits.contains(s.unit) ? s.unit : (s.unit.isNotEmpty ? 'अन्य' : null);
     });
     _nameFocus.unfocus();
     _suppressSuggestions = false;
@@ -126,6 +138,8 @@ class _InventoryScreenState extends State<InventoryScreen>
       _lowStockLimit   = 10;
       _aliases         = [];
       _showSuggestions = false;
+      _selCategory     = _kCategories.contains(m.category) ? m.category : (m.category.isNotEmpty ? 'अन्य' : null);
+      _selUnit         = _kUnits.contains(m.unit) ? m.unit : (m.unit.isNotEmpty ? 'अन्य' : null);
     });
     _nameFocus.unfocus();
     _suppressSuggestions = false;
@@ -178,6 +192,8 @@ class _InventoryScreenState extends State<InventoryScreen>
     _lowStockLimit   = 10;
     _aliases         = [];
     _showSuggestions = false;
+    _selCategory     = null;
+    _selUnit         = null;
     _suppressSuggestions = false;
   }
 
@@ -378,27 +394,53 @@ class _InventoryScreenState extends State<InventoryScreen>
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             _lbl('श्रेणी'),
             const SizedBox(height: 4),
-            TextField(
-              controller: _categoryCtrl,
-              decoration: const InputDecoration(
-                hintText: 'उदा. अनाज',
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              ),
+            _dropdownField(
+              value: _selCategory,
+              items: _kCategories,
+              hint: 'चुनें',
+              onChanged: (v) => setState(() {
+                _selCategory = v;
+                if (v != null && v != 'अन्य') _categoryCtrl.text = v;
+                else if (v == 'अन्य') _categoryCtrl.text = '';
+              }),
             ),
+            if (_selCategory == 'अन्य') ...[
+              const SizedBox(height: 6),
+              TextField(
+                controller: _categoryCtrl,
+                decoration: const InputDecoration(
+                  hintText: 'श्रेणी लिखें...',
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+              ),
+            ],
           ])),
           const SizedBox(width: 10),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             _lbl('इकाई'),
             const SizedBox(height: 4),
-            TextField(
-              controller: _unitCtrl,
-              decoration: const InputDecoration(
-                hintText: 'उदा. किलो',
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              ),
+            _dropdownField(
+              value: _selUnit,
+              items: _kUnits,
+              hint: 'चुनें',
+              onChanged: (v) => setState(() {
+                _selUnit = v;
+                if (v != null && v != 'अन्य') _unitCtrl.text = v;
+                else if (v == 'अन्य') _unitCtrl.text = '';
+              }),
             ),
+            if (_selUnit == 'अन्य') ...[
+              const SizedBox(height: 6),
+              TextField(
+                controller: _unitCtrl,
+                decoration: const InputDecoration(
+                  hintText: 'इकाई लिखें...',
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+              ),
+            ],
           ])),
         ]),
         const SizedBox(height: 12),
@@ -455,13 +497,17 @@ class _InventoryScreenState extends State<InventoryScreen>
           GestureDetector(
             onTap: _addAlias,
             child: Container(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
                 color: AppColors.primaryLight,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
               ),
-              child: const Icon(Icons.add, color: AppColors.primary, size: 20),
+              child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.add, color: AppColors.primary, size: 16),
+                SizedBox(width: 4),
+                Text('जोड़ें', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600, fontSize: 12)),
+              ]),
             ),
           ),
         ]),
@@ -791,4 +837,36 @@ class _InventoryScreenState extends State<InventoryScreen>
       style: const TextStyle(
           fontSize: 12, fontWeight: FontWeight.w700,
           color: AppColors.textSecondary));
+
+  Widget _dropdownField({
+    required String? value,
+    required List<String> items,
+    required String hint,
+    required void Function(String?) onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.surface2,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border, width: 1.5),
+      ),
+      child: DropdownButton<String>(
+        value: value,
+        hint: Text(hint,
+            style: const TextStyle(
+                color: Color(0xFFB0BAC8),
+                fontSize: 13,
+                fontStyle: FontStyle.italic)),
+        isExpanded: true,
+        underline: const SizedBox.shrink(),
+        icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.textMuted, size: 18),
+        style: const TextStyle(color: AppColors.textPrimary, fontSize: 13, fontWeight: FontWeight.w500),
+        items: items
+            .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+            .toList(),
+        onChanged: onChanged,
+      ),
+    );
+  }
 }

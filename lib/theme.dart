@@ -52,6 +52,12 @@ final ThemeData appTheme = ThemeData(
   inputDecorationTheme: InputDecorationTheme(
     filled: true,
     fillColor: AppColors.surface2,
+    hintStyle: const TextStyle(
+      color: Color(0xFFB0BAC8),
+      fontSize: 13,
+      fontWeight: FontWeight.w400,
+      fontStyle: FontStyle.italic,
+    ),
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
       borderSide: const BorderSide(color: AppColors.border, width: 1.5),
