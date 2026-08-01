@@ -7,6 +7,7 @@ import '../services/draft_service.dart';
 import '../services/supabase_service.dart';
 import '../services/voice_service.dart';
 import '../theme.dart';
+import '../utils/analytics.dart';
 import '../utils/bill_pdf.dart';
 import 'past_bills_screen.dart';
 import 'recording_screen.dart';
@@ -96,9 +97,11 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
       savedAt: DateTime.now(),
     );
     await DraftService.saveDraft(draft);
+    Analytics.billDraftSaved();
   }
 
   void _resumeDraft(DraftBill draft) {
+    Analytics.billDraftResumed();
     setState(() {
       _currentDraftId = draft.id;
       _billItems = List.from(draft.items);
@@ -168,6 +171,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   }
 
   void _removeItem(int i) {
+    Analytics.billItemRemoved();
     final items = [..._billItems];
     items.removeAt(i);
     setState(() => _billItems = items);
@@ -188,6 +192,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   }
 
   void _addManualItem() {
+    Analytics.billItemAddedManual();
     _addBlankItem();
     _showItemPicker(_billItems.length - 1);
   }
@@ -205,6 +210,12 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
         discountAmount: _discount,
         customerName: _customerName.isEmpty ? null : _customerName,
         isCredit: _isCredit,
+      );
+
+      Analytics.billConfirmed(
+        totalAmount: finalTotal,
+        isCredit: _isCredit,
+        itemCount: validItems.length,
       );
 
       await DraftService.deleteDraft(_currentDraftId);
@@ -232,6 +243,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
         grandTotal: _grandTotal,
         shopName: _shopName,
       );
+      Analytics.billPdfDownloaded();
       await Printing.layoutPdf(onLayout: (_) async => bytes);
     } catch (e) {
       if (mounted) _showSnack('PDF डाउनलोड में त्रुटि: $e');
@@ -249,6 +261,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
         grandTotal: _grandTotal,
         shopName: _shopName,
       );
+      Analytics.billPdfShared();
       await Printing.sharePdf(bytes: bytes, filename: 'bill.pdf');
     } catch (e) {
       if (mounted) _showSnack('PDF शेयर में त्रुटि: $e');
@@ -268,6 +281,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   }
 
   Future<void> _openRecordingScreen() async {
+    Analytics.voiceSessionOpened();
     final results = await Navigator.push<List<BillItem>>(
       context,
       MaterialPageRoute(
@@ -1012,7 +1026,10 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: () => setState(() => _view = BillingView.settlement),
+                onPressed: () {
+                  Analytics.billProceedCheckout(itemCount: _billItems.length);
+                  setState(() => _view = BillingView.settlement);
+                },
                 icon: const Icon(Icons.receipt_long),
                 label: const Text('बिल सेटल करें →', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                 style: ElevatedButton.styleFrom(

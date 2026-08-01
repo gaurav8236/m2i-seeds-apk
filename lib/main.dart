@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:logrocket_flutter/logrocket_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
 import 'screens/login_screen.dart';
@@ -7,6 +8,7 @@ import 'screens/onboarding_screen.dart';
 import 'services/auth_service.dart';
 import 'supabase_config.dart';
 import 'theme.dart';
+import 'utils/analytics.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,7 +23,12 @@ void main() async {
     publishableKey: SupabaseConfig.supabaseAnonKey,
   );
 
-  runApp(const SmartDukanApp());
+  // wrapAndInitialize captures the full session replay from app launch.
+  await LogRocket.wrapAndInitialize(
+    LogRocketWrapConfiguration(),
+    LogRocketInitConfiguration(appID: Analytics.appId),
+    () => runApp(const SmartDukanApp()),
+  );
 }
 
 class SmartDukanApp extends StatelessWidget {
@@ -29,11 +36,14 @@ class SmartDukanApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'SmartDukan',
-      debugShowCheckedModeBanner: false,
-      theme: appTheme,
-      home: const AuthGate(),
+    return LogRocketWidget(
+      child: MaterialApp(
+        title: 'SmartDukan',
+        debugShowCheckedModeBanner: false,
+        theme: appTheme,
+        navigatorObservers: [LogRocketNavigatorObserver('smartdukan')],
+        home: const AuthGate(),
+      ),
     );
   }
 }
@@ -69,6 +79,16 @@ class _AuthGateState extends State<AuthGate> {
         if (session == null) return const LoginScreen();
 
         AuthService.ensureUserRow();
+
+        // Identify the LogRocket session once the user is authenticated.
+        final user = AuthService.currentUser;
+        if (user != null) {
+          Analytics.identifyUser(
+            userId: user.id,
+            name: user.userMetadata?['full_name']?.toString(),
+            email: user.email,
+          );
+        }
 
         if (_seenOnboarding == null) {
           return const Scaffold(

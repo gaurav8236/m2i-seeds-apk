@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../theme.dart';
+import '../utils/analytics.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -14,9 +15,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _signIn() async {
     setState(() => _loading = true);
+    Analytics.loginStarted();
     try {
       await AuthService.signInWithGoogle();
+      Analytics.loginSuccess();
     } catch (e) {
+      Analytics.loginFailed(e.toString());
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

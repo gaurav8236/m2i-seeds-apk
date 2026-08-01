@@ -20,6 +20,7 @@ dependencies:
   permission_handler: ^11.3.1
   cupertino_icons: ^1.0.6
   google_sign_in: ^6.2.0
+  logrocket_flutter: ^1.1.2
 
 dev_dependencies:
   flutter_test:

@@ -4,6 +4,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../models/models.dart';
 import '../services/voice_service.dart';
 import '../theme.dart';
+import '../utils/analytics.dart';
 
 class RecordingScreen extends StatefulWidget {
   final List<StockItem> stockList;
@@ -62,12 +63,14 @@ class _RecordingScreenState extends State<RecordingScreen>
     if (!status.isGranted) {
       status = await Permission.microphone.request();
       if (!status.isGranted) {
+        Analytics.micPermissionDenied();
         if (mounted) Navigator.pop(context);
         return;
       }
     }
     try {
       await VoiceService.startRecording();
+      Analytics.recordingStarted();
       setState(() {
         _isRecording = true;
         _transcript = _transcriptHints[0];
@@ -84,6 +87,7 @@ class _RecordingScreenState extends State<RecordingScreen>
 
   Future<void> _stopAndProcess() async {
     _hintTimer?.cancel();
+    Analytics.recordingStopped();
     setState(() {
       _isRecording = false;
       _isProcessing = true;
@@ -99,8 +103,18 @@ class _RecordingScreenState extends State<RecordingScreen>
     try {
       final results = await VoiceService.processVoice(audioPath: path);
       final items = _processResults(results);
+      final matched = items.length;
+      if (matched == 0) {
+        Analytics.voiceApiNoItems(reason: 'no_match');
+      } else {
+        Analytics.voiceApiSuccess(
+          itemsFound: results.length,
+          itemsMatched: matched,
+        );
+      }
       if (mounted) Navigator.pop(context, items);
     } catch (e) {
+      Analytics.voiceApiError(error: e.toString());
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('त्रुटि: $e')));
