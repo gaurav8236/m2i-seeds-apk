@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import '../models/models.dart';
+import '../services/auth_service.dart';
 import '../services/draft_service.dart';
 import '../services/supabase_service.dart';
 import '../services/voice_service.dart';
@@ -31,6 +32,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   double _finalTotal = 0;
   String _currentDraftId = DateTime.now().millisecondsSinceEpoch.toString();
   List<DraftBill> _drafts = [];
+  String _shopName = '';
 
   // Settlement
   final _customerController = TextEditingController();
@@ -69,11 +71,15 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
         SupabaseService.fetchStock(),
         SupabaseService.fetchCustomerNames(),
         DraftService.loadDrafts(),
+        AuthService.fetchProfile(),
       ]);
-      if (mounted) setState(() {
+      if (!mounted) return;
+      setState(() {
         _stockList = results[0] as List<StockItem>;
         _customerNames = results[1] as List<String>;
         _drafts = results[2] as List<DraftBill>;
+        final profile = results[3] as Map<String, String?>;
+        _shopName = profile['shop_name'] ?? '';
       });
     } catch (_) {
       if (mounted) _showSnack('डेटा लोड नहीं हो सका, दोबारा कोशिश करें');
@@ -224,6 +230,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
         subTotal: _subTotal,
         discount: _discount,
         grandTotal: _grandTotal,
+        shopName: _shopName,
       );
       await Printing.layoutPdf(onLayout: (_) async => bytes);
     } catch (e) {
@@ -240,6 +247,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
         subTotal: _subTotal,
         discount: _discount,
         grandTotal: _grandTotal,
+        shopName: _shopName,
       );
       await Printing.sharePdf(bytes: bytes, filename: 'bill.pdf');
     } catch (e) {
