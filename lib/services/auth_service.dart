@@ -33,6 +33,13 @@ class AuthService {
   static bool get isLoggedIn => _supabase.auth.currentSession != null;
   static Stream<AuthState> get authStateChanges => _supabase.auth.onAuthStateChange;
 
+  // In-memory cache so bill reprints don't need an extra network call.
+  static String? _cachedShopName;
+
+  /// Shop name cached from the last fetchProfile() call.
+  /// Empty string if the user hasn't set one yet.
+  static String get shopName => _cachedShopName ?? '';
+
   static bool _userRowEnsured = false;
 
   // Mirrors web's resolveUserId — guarantees a row exists in public.users
@@ -83,6 +90,7 @@ class AuthService {
           .select('display_name, shop_name')
           .eq('id', user.id)
           .single();
+      _cachedShopName = res['shop_name']?.toString();
       return {
         'display_name': res['display_name']?.toString(),
         'shop_name': res['shop_name']?.toString(),

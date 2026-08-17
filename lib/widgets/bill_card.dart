@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import '../models/models.dart';
 import '../theme.dart';
+import '../services/auth_service.dart';
 import '../utils/bill_pdf.dart';
 
 // ── Shared filter type ───────────────────────────────────────────────────────
@@ -209,6 +210,8 @@ class _BillDetailSheetState extends State<_BillDetailSheet> {
         discount: discount,
         grandTotal: bill.totalAmount,
         date: bill.createdAt,
+        // Use cached shop name so reprints show the correct dukan name (#8).
+        shopName: AuthService.shopName,
       );
       if (isPrint) {
         await Printing.layoutPdf(onLayout: (_) async => bytes);
