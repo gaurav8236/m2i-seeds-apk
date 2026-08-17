@@ -46,6 +46,7 @@ CREATE POLICY "users_own_user_stock" ON user_stock
   WITH CHECK (auth.uid() = user_id);
 
 -- ── voice_logs ───────────────────────────────────────────────────────────────
+-- NOTE: voice_logs.user_id is TEXT (not uuid), so auth.uid() must be cast.
 
 ALTER TABLE voice_logs ENABLE ROW LEVEL SECURITY;
 
@@ -53,8 +54,8 @@ DROP POLICY IF EXISTS "users_own_voice_logs" ON voice_logs;
 
 CREATE POLICY "users_own_voice_logs" ON voice_logs
   FOR ALL
-  USING  (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
+  USING  (auth.uid()::text = user_id)
+  WITH CHECK (auth.uid()::text = user_id);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Verify (run after migration):
