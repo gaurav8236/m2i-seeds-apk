@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/supabase_service.dart';
 import '../theme.dart';
+import '../utils/validators.dart';
 import '../widgets/bill_card.dart';
 import 'add_customer_screen.dart';
 
@@ -800,24 +801,26 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
     });
   }
 
-  // Outstanding = opening balance (pre-existing debt) + bill credits − payments.
-  // Without openingBalance, customers who owe money but have no bills show ₹0 (bug #59).
+  // Outstanding = openingBalance + credits − payments.
+  // Cash sales ('sale') are settled at point-of-sale — neutral, not subtracted.
   double get _outstanding {
     final billsNet = _ledger.fold<double>(0, (s, e) {
       final amt = (e['amount'] as num?)?.toDouble() ?? 0;
-      return e['type'] == 'credit' ? s + amt : s - amt;
+      if (e['type'] == 'credit') return s + amt;
+      if (e['type'] == 'payment') return s - amt;
+      return s; // 'sale' — already paid, no outstanding impact
     });
     return (billsNet + _customer.openingBalance).clamp(0, double.infinity);
   }
 
   Future<void> _recordPayment() async {
-    final amt = double.tryParse(_payCtrl.text);
-    // Show an explicit error — silent return leaves the user confused (bug #50)
-    if (amt == null || amt <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('सही राशि डालें — 0 से अधिक होनी चाहिए')));
+    final amtErr = Validators.paymentAmount(_payCtrl.text);
+    if (amtErr != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(amtErr)));
       return;
     }
+    final amt = double.parse(_payCtrl.text.trim());
     setState(() => _paying = true);
     try {
       await SupabaseService.recordPayment(
@@ -1067,42 +1070,65 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
   }
 
   Widget _ledgerRow(Map<String, dynamic> entry) {
-    final type = entry['type'] as String? ?? '';
+    final type = entry['type'] as String? ?? 'sale';
     final amt = (entry['amount'] as num?)?.toDouble() ?? 0;
     final date = entry['created_at'] != null
         ? DateTime.tryParse(entry['created_at'] as String)
         : null;
-    final isCredit = type == 'credit';
+
+    // Visual treatment per transaction type:
+    //   credit  → red  / arrow-up    / उधार   / +₹
+    //   payment → green/ arrow-down  / भुगतान / −₹
+    //   sale    → blue / shopping bag/ नकद बिक्री / ₹ (neutral)
+    final Color iconBg;
+    final Color iconColor;
+    final IconData icon;
+    final String label;
+    final String amtPrefix;
+
+    switch (type) {
+      case 'credit':
+        iconBg = AppColors.dangerLight;
+        iconColor = AppColors.danger;
+        icon = Icons.arrow_upward;
+        label = 'उधार';
+        amtPrefix = '+';
+        break;
+      case 'payment':
+        iconBg = AppColors.successLight;
+        iconColor = AppColors.success;
+        icon = Icons.arrow_downward;
+        label = 'भुगतान';
+        amtPrefix = '−';
+        break;
+      default: // 'sale'
+        iconBg = AppColors.primaryLight;
+        iconColor = AppColors.primary;
+        icon = Icons.shopping_bag_outlined;
+        label = 'नकद बिक्री';
+        amtPrefix = '';
+    }
 
     return ListTile(
       contentPadding:
           const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
       leading: Container(
         width: 36, height: 36,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: isCredit ? AppColors.dangerLight : AppColors.successLight,
-        ),
-        child: Icon(
-          isCredit ? Icons.arrow_upward : Icons.arrow_downward,
-          size: 18,
-          color: isCredit ? AppColors.danger : AppColors.success,
-        ),
+        decoration: BoxDecoration(shape: BoxShape.circle, color: iconBg),
+        child: Icon(icon, size: 18, color: iconColor),
       ),
-      title: Text(isCredit ? 'उधार' : 'भुगतान',
+      title: Text(label,
           style: TextStyle(
-              fontWeight: FontWeight.w600, fontSize: 13,
-              color: isCredit ? AppColors.danger : AppColors.success)),
+              fontWeight: FontWeight.w600, fontSize: 13, color: iconColor)),
       subtitle: date != null
           ? Text(DateFormat('dd MMM, hh:mm a').format(date),
               style: const TextStyle(
                   fontSize: 11, color: AppColors.textMuted))
           : null,
       trailing: Text(
-        '${isCredit ? '+' : '-'}₹${amt.toStringAsFixed(0)}',
+        '$amtPrefix₹${amt.toStringAsFixed(0)}',
         style: TextStyle(
-            fontWeight: FontWeight.w800, fontSize: 15,
-            color: isCredit ? AppColors.danger : AppColors.success),
+            fontWeight: FontWeight.w800, fontSize: 15, color: iconColor),
       ),
     );
   }

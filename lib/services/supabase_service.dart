@@ -159,7 +159,7 @@ class SupabaseService {
 
     final res = await _client
         .from('past_bills')
-        .select('total_amount, is_credit')
+        .select('total_amount, is_credit, transaction_type')
         .eq('user_id', userId)
         .gte('created_at', from.toUtc().toIso8601String())
         .lte('created_at', to.toUtc().toIso8601String());
@@ -167,9 +167,15 @@ class SupabaseService {
     double credit = 0, paid = 0;
     for (final bill in (res as List)) {
       final amount = (bill['total_amount'] as num?)?.toDouble() ?? 0;
-      if (bill['is_credit'] == true) {
+      // Resolve type — prefer transaction_type; fall back to is_credit for old rows.
+      final txType = bill['transaction_type']?.toString();
+      final resolvedType = (txType != null && txType.isNotEmpty)
+          ? txType
+          : (bill['is_credit'] == true ? 'credit' : 'sale');
+      if (resolvedType == 'credit') {
         credit += amount;
       } else {
+        // 'sale' and 'payment' both represent cash received in the period.
         paid += amount;
       }
     }
@@ -188,12 +194,22 @@ class SupabaseService {
     // Bills query — primary source, must succeed.
     final billRes = await _client
         .from('past_bills')
-        .select('total_amount, is_credit')
+        .select('total_amount, is_credit, transaction_type')
         .eq('user_id', userId)
         .not('customer_name', 'is', null);
     for (final bill in (billRes as List)) {
       final amount = (bill['total_amount'] as num?)?.toDouble() ?? 0;
-      total += bill['is_credit'] == true ? amount : -amount;
+      final txType = bill['transaction_type']?.toString();
+      final resolvedType = (txType != null && txType.isNotEmpty)
+          ? txType
+          : (bill['is_credit'] == true ? 'credit' : 'sale');
+      // Only credit adds to outstanding; only payment subtracts.
+      // Cash sales ('sale') are settled at point-of-sale — neutral.
+      if (resolvedType == 'credit') {
+        total += amount;
+      } else if (resolvedType == 'payment') {
+        total -= amount;
+      }
     }
 
     // Opening balances — secondary; if this query fails, return bills-only total
@@ -227,13 +243,16 @@ class SupabaseService {
 
     final billRes = await _client
         .from('past_bills')
-        .select('customer_name, total_amount, is_credit, created_at')
+        .select('customer_name, total_amount, is_credit, transaction_type, created_at')
         .eq('user_id', userId)
         .not('customer_name', 'is', null);
 
-    // Aggregate bill amounts + last purchase date per customer name.
-    // Key is lowercased + trimmed so "Rahul" and "rahul " map to the same bucket
-    // (bug #58 — case-insensitive dedup must also apply here, not just fetchCustomerNames).
+    // Aggregate bill amounts + last activity date per customer name.
+    // Key is lowercased + trimmed — case-insensitive dedup (bug #58).
+    // Outstanding logic:
+    //   'credit'  → customer owes money  (adds to outstanding)
+    //   'payment' → customer paid        (subtracts from outstanding)
+    //   'sale'    → cash at point-of-sale (neutral — already settled)
     final Map<String, Map<String, dynamic>> agg = {};
     for (final bill in (billRes as List)) {
       final name = bill['customer_name']?.toString().trim() ?? '';
@@ -241,11 +260,16 @@ class SupabaseService {
       final key = name.toLowerCase();
       agg.putIfAbsent(key, () => {'credit': 0.0, 'paid': 0.0, 'lastDate': null});
       final amt = (bill['total_amount'] as num?)?.toDouble() ?? 0;
-      if (bill['is_credit'] == true) {
+      final txType = bill['transaction_type']?.toString();
+      final resolvedType = (txType != null && txType.isNotEmpty)
+          ? txType
+          : (bill['is_credit'] == true ? 'credit' : 'sale');
+      if (resolvedType == 'credit') {
         agg[key]!['credit'] = (agg[key]!['credit'] as double) + amt;
-      } else {
+      } else if (resolvedType == 'payment') {
         agg[key]!['paid'] = (agg[key]!['paid'] as double) + amt;
       }
+      // 'sale' is neutral — no outstanding impact.
       final date = DateTime.tryParse(bill['created_at'] as String? ?? '');
       final existing = agg[key]!['lastDate'] as DateTime?;
       if (date != null && (existing == null || date.isAfter(existing))) {
@@ -332,15 +356,22 @@ class SupabaseService {
 
     final res = await _client
         .from('past_bills')
-        .select('*')
+        .select('total_amount, is_credit, transaction_type, created_at')
         .eq('user_id', userId)
         .eq('customer_name', customerName)
         .order('created_at', ascending: false);
 
-    return (res as List).map((bill) => {
-      'type': bill['is_credit'] == true ? 'credit' : 'payment',
-      'amount': (bill['total_amount'] as num?)?.toDouble() ?? 0,
-      'created_at': bill['created_at']?.toString(),
+    return (res as List).map((bill) {
+      final txType = bill['transaction_type']?.toString();
+      // Back-compat: old rows without transaction_type use is_credit.
+      final resolvedType = (txType != null && txType.isNotEmpty)
+          ? txType
+          : (bill['is_credit'] == true ? 'credit' : 'sale');
+      return {
+        'type': resolvedType,
+        'amount': (bill['total_amount'] as num?)?.toDouble() ?? 0,
+        'created_at': bill['created_at']?.toString(),
+      };
     }).toList();
   }
 
@@ -360,6 +391,8 @@ class SupabaseService {
         'discount_amount': 0,
         'customer_name': customerName,
         'is_credit': false,
+        // Explicit type so the backend doesn't derive 'sale' from is_credit=false.
+        'transaction_type': 'payment',
         'items': [
           {
             'stock_id': null,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/supabase_service.dart';
 import '../theme.dart';
+import '../utils/validators.dart';
 import 'stock_item_detail_screen.dart';
 
 class InventoryScreen extends StatefulWidget {
@@ -157,23 +158,15 @@ class _InventoryScreenState extends State<InventoryScreen>
 
   // ── Preview ────────────────────────────────────────────────────────────────
 
-  // Returns true if value has at most 1 decimal place (e.g. 39.5 ✓, 39.55 ✗)
-  bool _isOneDecimal(double v) => (v * 10).roundToDouble() == v * 10;
-
   void _addToPreview() {
+    final nameErr  = Validators.itemName(_nameCtrl.text);
+    final priceErr = Validators.sellingPrice(_priceCtrl.text);
+    final stockErr = Validators.currentStock(_stockCtrl.text);
+    final firstErr = nameErr ?? priceErr ?? stockErr;
+    if (firstErr != null) { _snack(firstErr); return; }
     final name  = _nameCtrl.text.trim();
-    final price = double.tryParse(_priceCtrl.text);
-    final stock = double.tryParse(_stockCtrl.text);
-    if (name.isEmpty || price == null || stock == null) {
-      _snack('कृपया नाम, कीमत और स्टॉक भरें');
-      return;
-    }
-    if (price < 0) { _snack('कीमत 0 से कम नहीं हो सकती'); return; }
-    if (stock < 0)  { _snack('स्टॉक 0 से कम नहीं हो सकता'); return; }
-    if (!_isOneDecimal(stock)) {
-      _snack('स्टॉक में एक दशमलव तक ही अनुमत है (जैसे: 39.5)');
-      return;
-    }
+    final price = double.parse(_priceCtrl.text.trim());
+    final stock = double.parse(_stockCtrl.text.trim());
     setState(() {
       _preview.add({
         'item_name':       name,

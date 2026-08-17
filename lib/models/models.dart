@@ -97,6 +97,8 @@ class Bill {
   final double totalAmount;
   final double? discountAmount;
   final bool isCredit;
+  // 'sale' | 'credit' | 'payment' — falls back to is_credit for old rows.
+  final String transactionType;
   final List<Map<String, dynamic>> billDetails;
 
   Bill({
@@ -106,17 +108,24 @@ class Bill {
     required this.totalAmount,
     this.discountAmount,
     required this.isCredit,
+    required this.transactionType,
     required this.billDetails,
   });
 
   factory Bill.fromMap(Map<String, dynamic> map) {
+    final isCredit = map['is_credit'] == true;
+    final txType = map['transaction_type']?.toString();
     return Bill(
       id: map['id']?.toString() ?? '',
       createdAt: DateTime.tryParse(map['created_at'] ?? '') ?? DateTime.now(),
       customerName: map['customer_name']?.toString(),
       totalAmount: (map['total_amount'] as num?)?.toDouble() ?? 0,
       discountAmount: (map['discount_amount'] as num?)?.toDouble(),
-      isCredit: map['is_credit'] == true,
+      isCredit: isCredit,
+      // Back-compat: older rows may not have transaction_type set.
+      transactionType: (txType != null && txType.isNotEmpty)
+          ? txType
+          : (isCredit ? 'credit' : 'sale'),
       billDetails: () {
         final raw = map['bill_details'];
         if (raw is String) {

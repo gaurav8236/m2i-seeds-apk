@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/supabase_service.dart';
 import '../theme.dart';
+import '../utils/validators.dart';
 
 class StockItemDetailScreen extends StatefulWidget {
   final StockItem item;
@@ -67,33 +68,19 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
     }
   }
 
-  // Returns true if value has at most 1 decimal place (e.g. 39.5 ✓, 39.55 ✗)
-  bool _isOneDecimal(double v) => (v * 10).roundToDouble() == v * 10;
-
   Future<void> _save() async {
-    final name = _nameCtrl.text.trim();
-    final price = double.tryParse(_priceCtrl.text);
-    final newStock = double.tryParse(_stockCtrl.text);
-    if (name.isEmpty || price == null || newStock == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('नाम, कीमत और स्टॉक भरें')));
+    final nameErr = Validators.itemName(_nameCtrl.text);
+    final priceErr = Validators.sellingPrice(_priceCtrl.text);
+    final stockErr = Validators.currentStock(_stockCtrl.text);
+    final firstErr = nameErr ?? priceErr ?? stockErr;
+    if (firstErr != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(firstErr)));
       return;
     }
-    if (price < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('कीमत 0 से कम नहीं हो सकती')));
-      return;
-    }
-    if (newStock < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('स्टॉक 0 से कम नहीं हो सकता')));
-      return;
-    }
-    if (!_isOneDecimal(newStock)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('स्टॉक में एक दशमलव तक ही अनुमत है (जैसे: 39.5)')));
-      return;
-    }
+    final name     = _nameCtrl.text.trim();
+    final price    = double.parse(_priceCtrl.text.trim());
+    final newStock = double.parse(_stockCtrl.text.trim());
 
     setState(() => _saving = true);
     try {
