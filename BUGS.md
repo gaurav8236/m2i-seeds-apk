@@ -384,6 +384,154 @@ Sync mechanism: NONE currently — Admin uses force-dynamic but no realtime subs
 | 54 | Discount > total bill — no error | F3 Billing | P2 | 🔴 Open | No |
 | 55 | ₹3,090 shown as ₹3.0K (formatting) | F4 Customer | P3 | 🔴 Open | No |
 | 56 | Previous screen shown after app restart | F6 Navigation | P3 | 🔴 Open | No |
+| 57 | Customer name not trimmed — "Rahul " ≠ "Rahul" (DB confirmed) | F4 Customer | P1 | 🔴 Open | No |
+| 58 | "Mayank" and "mayank" treated as different customers — ₹13,184 Udhar split (DB confirmed) | F4 Customer | P0 | 🔴 Open | No |
+| 59 | Negative selling_price allowed — item 'ahah' has price = -₹100 (DB confirmed) | F2 Inventory | P1 | 🔴 Open | Yes |
+| 60 | Negative current_stock allowed — item 'akag' has stock = -10 (DB confirmed) | F2 Inventory | P0 | 🔴 Open | Yes |
+| 61 | Decimal stock allowed — 5 items (Dalchini, Dhaniya, Garam Masala, Jeera, jlaah) have .5 fractional stock (DB confirmed) | F2 Inventory | P2 | 🔴 Open | Yes |
+| 62 | No ON DELETE CASCADE on user_stock.product_id FK — deleting a master item leaves orphan stock rows | F2 Inventory | P1 | 🔴 Open | Yes |
+
+---
+
+---
+
+## Live DB Audit — 2026-08-17 (Service Role, Full Access)
+
+> Discovered by connecting with service role key. Audit script: `supabase/data_audit.sql`  
+> All findings below are NEW — not previously visible via anon key.
+
+### Schema correction: `user_stock` real columns
+
+The earlier audit used a wrong column name (`master_item_id`) — that column does not exist.  
+Real schema: `user_stock.product_id` → FK to `master_inventory.id`  
+All stock rows are **correctly linked** (0 true orphans).
+
+**Full `user_stock` columns (discovered via service role):**
+```
+id, user_id, product_id, selling_price, cost_price, current_stock,
+low_stock_limit, aliases, monthly_consumption, supplier_name, expiry_date,
+created_at, updated_at
+```
+
+Additional columns not in original plan: `cost_price`, `monthly_consumption`,
+`supplier_name`, `expiry_date` — all NULL currently, reserved for future features.
+
+---
+
+### Audit-discovered Bugs (logged 2026-08-17)
+
+| # | Bug | Feature | Found In | Priority | Status | Schema? |
+|---|---|---|---|---|---|---|
+| 57 | Customer name not trimmed on save — "Rahul " ≠ "Rahul" | F4 Customer | `customers.name` in live DB | P1 | 🔴 Open | No |
+| 58 | Customer name not normalized for search — "Mayank" and "mayank" are separate customers, splitting ₹13,184 Udhar across two records | F4 Customer | `past_bills.customer_name` in live DB | P0 | 🔴 Open | No |
+| 59 | `selling_price` allows negative — found item 'ahah' with price = -₹100 | F2 Inventory | `user_stock` live DB | P1 | 🔴 Open | No |
+| 60 | `current_stock` allows negative — found item 'akag' with stock = -10 | F2 Inventory | `user_stock` live DB | P0 | 🔴 Open | No |
+| 61 | `current_stock` stores decimals — Dalchini 39.5, Dhaniya Powder 39.5, Garam Masala 39.5, Jeera 39.5, 'jlaah' 9.7 — integer-only rule violated (5 rows) | F2 Inventory | `user_stock` live DB | P2 | 🔴 Open | No |
+| 62 | No `ON DELETE CASCADE` on `user_stock.product_id → master_inventory.id` — deleting a master item leaves stock rows as orphans | F2 Inventory | Schema | P1 | 🔴 Open | Yes |
+
+**Bug #57 detail — trailing space:**
+- DB row 1: `name = "Rahul"`
+- DB row 2: `name = "Rahul "` (trailing space)
+- These are the same person — two customer entries for same shopkeeper
+- Fix: `.trim()` in Flutter before every customer name write
+
+**Bug #58 detail — case split:**
+- DB rows for bills: `customer_name = "Mayank"` (7 bills, ₹7,550) + `"mayank"` (2 bills, ₹5,634)
+- Same person, 9 bills, ₹13,184 Udhar split across two name-string buckets
+- Root cause is #52 (string FK, not ID) — #58 is a severity amplifier for the same root cause
+- Fix: `.trim().toLowerCase()` for matching + search; display as-entered
+
+**Bug #60 + #62 decisions:**
+- No negative stock allowed — block at validation AND backend check (before deducting)
+- No `ON DELETE CASCADE` means deleting a master item silently leaves stock rows with a dangling FK
+- Fix: add `ON DELETE CASCADE` to `user_stock.product_id` FK in Sprint 2 migration
+
+**Bug #61 — decimal stock decisions:**
+- Dalchini, Dhaniya, Garam Masala, Jeera have 39.5 stock — these are spice items likely sold in fractional units
+- **Decision (user confirmed):** integers only, no rounding allowed
+- These 5 rows need **manual correction** — shopkeeper to decide correct integer value
+- Fix: block decimal input in Flutter stock fields going forward; do NOT auto-round existing values
+
+---
+
+### Sprint 2 SQL — Updated Plan
+
+Add these to the schema migration run in Sprint 2:
+
+```sql
+-- ── SPRINT 2 MIGRATIONS ─────────────────────────────────────────────────────
+
+-- 1. customer_id FK on past_bills (links bill to customer by ID, not name string)
+ALTER TABLE past_bills
+  ADD COLUMN customer_id UUID REFERENCES customers(id) ON DELETE SET NULL;
+-- Keep customer_name as snapshot — never rewrite retroactively
+
+-- 2. transaction_type on past_bills (separates sales from payment receipts)
+ALTER TABLE past_bills
+  ADD COLUMN transaction_type TEXT NOT NULL DEFAULT 'sale'
+  CHECK (transaction_type IN ('sale', 'payment'));
+-- ⚠️ Do NOT backfill via text pattern matching — see BUSINESS_RULES.md §9
+
+-- 3. customer_no — auto-increment per shopkeeper, never reused
+ALTER TABLE customers
+  ADD COLUMN customer_no SERIAL;
+-- (Implement as BEFORE INSERT trigger scoping count to user_id)
+
+-- 4. tag — optional disambiguation label
+ALTER TABLE customers
+  ADD COLUMN tag TEXT;
+-- max 30 chars enforced in Flutter validators, not a DB constraint
+
+-- 5. is_active — soft delete
+ALTER TABLE customers
+  ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT true;
+-- Deactivation only when outstanding_balance = 0 (enforced in app, not DB)
+
+-- 6. ON DELETE CASCADE — fix dangling user_stock rows when master item deleted
+-- First find the existing FK constraint name:
+SELECT constraint_name
+FROM information_schema.table_constraints
+WHERE table_name = 'user_stock' AND constraint_type = 'FOREIGN KEY';
+
+-- Then drop and re-add with CASCADE:
+-- ALTER TABLE user_stock DROP CONSTRAINT <constraint_name>;
+ALTER TABLE user_stock
+  ADD CONSTRAINT user_stock_product_id_fkey
+  FOREIGN KEY (product_id) REFERENCES master_inventory(id) ON DELETE CASCADE;
+
+-- 7. Phone uniqueness per shopkeeper (when phone provided)
+ALTER TABLE customers
+  ADD CONSTRAINT customers_phone_unique_per_user
+  UNIQUE (user_id, phone);
+
+-- 8. Phone format: 10 digits only, no +91
+ALTER TABLE customers
+  ADD CONSTRAINT customers_phone_format
+  CHECK (phone IS NULL OR phone ~ '^[0-9]{10}$');
+
+-- 9. Block negative selling_price at DB level
+ALTER TABLE user_stock
+  ADD CONSTRAINT user_stock_price_non_negative
+  CHECK (selling_price >= 0);
+
+-- 10. Block negative current_stock at DB level
+ALTER TABLE user_stock
+  ADD CONSTRAINT user_stock_stock_non_negative
+  CHECK (current_stock >= 0);
+
+-- 11. Block decimal current_stock at DB level (integers only)
+ALTER TABLE user_stock
+  ADD CONSTRAINT user_stock_stock_integer
+  CHECK (current_stock = floor(current_stock));
+-- ⚠️ Run AFTER manually correcting the 5 decimal rows:
+--    Dalchini (39.5), Dhaniya Powder (39.5), Garam Masala (39.5),
+--    Jeera (39.5), 'jlaah' (9.7) — shopkeeper must set correct integer values first
+
+-- 12. Block decimal low_stock_limit (integers, min 1)
+ALTER TABLE user_stock
+  ADD CONSTRAINT user_stock_limit_integer_min1
+  CHECK (low_stock_limit >= 1 AND low_stock_limit = floor(low_stock_limit));
+```
 
 ---
 
