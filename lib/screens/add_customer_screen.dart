@@ -28,9 +28,19 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     try {
+      // Normalize phone: strip all non-digit chars first (handles hyphens/spaces),
+      // then strip country-code prefix or leading 0, keep exactly 10 digits.
+      String digits = _phoneCtrl.text.trim().replaceAll(RegExp(r'\D'), '');
+      if (digits.length == 12 && digits.startsWith('91')) {
+        digits = digits.substring(2); // +91XXXXXXXXXX → XXXXXXXXXX
+      } else if (digits.length == 11 && digits.startsWith('0')) {
+        digits = digits.substring(1); // 0XXXXXXXXXX → XXXXXXXXXX
+      }
+      final phone = digits.isEmpty ? null : digits;
+
       await SupabaseService.createCustomer(
         name: _nameCtrl.text.trim(),
-        phone: _phoneCtrl.text.trim().isEmpty ? null : _phoneCtrl.text.trim(),
+        phone: phone,
         openingBalance: double.tryParse(_balanceCtrl.text) ?? 0,
       );
       if (mounted) Navigator.pop(context);
@@ -105,12 +115,22 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
                   TextFormField(
                     controller: _nameCtrl,
                     textCapitalization: TextCapitalization.words,
+                    maxLength: 50, // bug #45 — prevent extremely long names
                     decoration: const InputDecoration(
                       hintText: 'जैसे: रमेश कुमार',
                       prefixIcon: Icon(Icons.person_outline, size: 18),
+                      counterText: '', // hide the built-in counter chip
                     ),
-                    validator: (v) =>
-                        v == null || v.trim().isEmpty ? 'नाम ज़रूरी है' : null,
+                    validator: (v) {
+                      final name = v?.trim() ?? '';
+                      if (name.isEmpty) return 'नाम ज़रूरी है';
+                      if (name.length < 2) return 'नाम कम से कम 2 अक्षर का होना चाहिए';
+                      // Allow Hindi (Devanagari), English letters, spaces, dot, hyphen (bug #37)
+                      if (!RegExp(r"^[ऀ-ॿa-zA-Z\s.\-']+$").hasMatch(name)) {
+                        return 'नाम में केवल अक्षर, स्पेस, . और - अनुमत हैं';
+                      }
+                      return null;
+                    },
                   ),
                   const SizedBox(height: 16),
 
@@ -122,11 +142,30 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
                     keyboardType: TextInputType.phone,
                     decoration: const InputDecoration(
                       hintText: '9876543210',
+                      helperText: 'सिर्फ 10 अंक लिखें — +91 मत डालें',
                       prefixIcon: Icon(Icons.phone_outlined, size: 18),
                     ),
+                    onChanged: (v) {
+                      // Auto-strip +91 or 0 prefix as user types (bug #57 prevention)
+                      String cleaned = v.trim();
+                      if (cleaned.startsWith('+91')) {
+                        cleaned = cleaned.substring(3).trim();
+                        _phoneCtrl.value = TextEditingValue(
+                          text: cleaned,
+                          selection: TextSelection.collapsed(offset: cleaned.length),
+                        );
+                      } else if (cleaned.startsWith('0') && cleaned.length > 10) {
+                        cleaned = cleaned.substring(1);
+                        _phoneCtrl.value = TextEditingValue(
+                          text: cleaned,
+                          selection: TextSelection.collapsed(offset: cleaned.length),
+                        );
+                      }
+                    },
                     validator: (v) {
-                      if (v == null || v.isEmpty) return null;
-                      if (v.length < 10) return 'सही नंबर डालें';
+                      if (v == null || v.trim().isEmpty) return null;
+                      final digits = v.trim().replaceAll(RegExp(r'\D'), '');
+                      if (digits.length != 10) return 'सिर्फ 10 अंक का नंबर डालें';
                       return null;
                     },
                   ),

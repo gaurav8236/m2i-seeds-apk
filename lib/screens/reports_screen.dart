@@ -124,8 +124,13 @@ class _ReportsScreenState extends State<ReportsScreen>
   void _showSnack(String msg) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
-  String _fmt(double n) =>
-      n >= 1000 ? '₹${(n / 1000).toStringAsFixed(1)}k' : '₹${n.toStringAsFixed(0)}';
+  // Bug #55: ₹3,090 was showing as ₹3.0k — threshold was too low.
+  // Now: below ₹1L shows full Indian-comma format (₹3,090 / ₹13,184);
+  // ₹1L+ shows compact (₹1.5L).
+  String _fmt(double n) {
+    if (n >= 100000) return '₹${(n / 100000).toStringAsFixed(1)}L';
+    return '₹${NumberFormat('#,##,##0', 'en_IN').format(n.round())}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -734,6 +739,12 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: () async {
+                  // Validate name — empty name breaks ledger lookup (bug #60)
+                  if (nameCtrl.text.trim().isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('नाम ज़रूरी है')));
+                    return;
+                  }
                   Navigator.pop(ctx);
                   try {
                     await SupabaseService.updateCustomer(
@@ -789,21 +800,29 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
     });
   }
 
+  // Outstanding = opening balance (pre-existing debt) + bill credits − payments.
+  // Without openingBalance, customers who owe money but have no bills show ₹0 (bug #59).
   double get _outstanding {
-    return _ledger.fold<double>(0, (s, e) {
+    final billsNet = _ledger.fold<double>(0, (s, e) {
       final amt = (e['amount'] as num?)?.toDouble() ?? 0;
       return e['type'] == 'credit' ? s + amt : s - amt;
-    }).clamp(0, double.infinity);
+    });
+    return (billsNet + _customer.openingBalance).clamp(0, double.infinity);
   }
 
   Future<void> _recordPayment() async {
     final amt = double.tryParse(_payCtrl.text);
-    if (amt == null || amt <= 0) return;
+    // Show an explicit error — silent return leaves the user confused (bug #50)
+    if (amt == null || amt <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('सही राशि डालें — 0 से अधिक होनी चाहिए')));
+      return;
+    }
     setState(() => _paying = true);
     try {
       await SupabaseService.recordPayment(
           customerName: _customer.name, amount: amt);
-      _payCtrl.clear();
+      if (mounted) _payCtrl.clear();
       await _load();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -819,8 +838,13 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
     }
   }
 
-  String _fmt(double n) =>
-      n >= 1000 ? '₹${(n / 1000).toStringAsFixed(1)}k' : '₹${n.toStringAsFixed(0)}';
+  // Bug #55: ₹3,090 was showing as ₹3.0k — threshold was too low.
+  // Now: below ₹1L shows full Indian-comma format (₹3,090 / ₹13,184);
+  // ₹1L+ shows compact (₹1.5L).
+  String _fmt(double n) {
+    if (n >= 100000) return '₹${(n / 100000).toStringAsFixed(1)}L';
+    return '₹${NumberFormat('#,##,##0', 'en_IN').format(n.round())}';
+  }
 
   @override
   Widget build(BuildContext context) {

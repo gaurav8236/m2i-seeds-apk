@@ -62,17 +62,47 @@ class SupabaseService {
     final userId = _userId;
     if (userId == null) return [];
 
-    final res = await _client
-        .from('past_bills')
-        .select('customer_name')
-        .eq('user_id', userId)
-        .not('customer_name', 'is', null);
+    // Case-insensitive dedup across both sources (bug #58).
+    // Seen set uses lowercased key; first-seen casing is kept for display.
+    final seen = <String>{};
+    final names = <String>[];
 
-    final names = (res as List)
-        .map((e) => e['customer_name']?.toString().trim() ?? '')
-        .where((n) => n.isNotEmpty)
-        .toSet()
-        .toList();
+    void addName(String? raw) {
+      final name = raw?.trim() ?? '';
+      if (name.isEmpty) return;
+      final key = name.toLowerCase();
+      if (seen.add(key)) names.add(name);
+    }
+
+    // Primary source: customers table (includes zero-bill customers — fixes #46 incomplete).
+    try {
+      final custRes = await _client
+          .from('customers')
+          .select('name')
+          .eq('user_id', userId)
+          .order('name');
+      for (final e in (custRes as List)) {
+        addName(e['name']?.toString());
+      }
+    } catch (_) {
+      // customers table unavailable — fall through to past_bills.
+    }
+
+    // Secondary source: past_bills (catches names for customers not in customers table).
+    try {
+      final billRes = await _client
+          .from('past_bills')
+          .select('customer_name')
+          .eq('user_id', userId)
+          .not('customer_name', 'is', null);
+      for (final e in (billRes as List)) {
+        addName(e['customer_name']?.toString());
+      }
+    } catch (_) {
+      // past_bills unavailable — return whatever customers table gave us.
+    }
+
+    names.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
     return names;
   }
 
@@ -131,8 +161,8 @@ class SupabaseService {
         .from('past_bills')
         .select('total_amount, is_credit')
         .eq('user_id', userId)
-        .gte('created_at', from.toIso8601String())
-        .lte('created_at', to.toIso8601String());
+        .gte('created_at', from.toUtc().toIso8601String())
+        .lte('created_at', to.toUtc().toIso8601String());
 
     double credit = 0, paid = 0;
     for (final bill in (res as List)) {
@@ -146,22 +176,40 @@ class SupabaseService {
     return {'credit': credit, 'paid': paid};
   }
 
-  // Total unpaid उधार across ALL customers — not period-filtered
+  // Total unpaid उधार across ALL customers — not period-filtered.
+  // Includes customers.opening_balance so customers with pre-existing debt but
+  // no bills are counted correctly on the dashboard KPI.
   static Future<double> fetchTotalOutstanding() async {
     final userId = _userId;
     if (userId == null) return 0;
 
-    final res = await _client
+    double total = 0;
+
+    // Bills query — primary source, must succeed.
+    final billRes = await _client
         .from('past_bills')
         .select('total_amount, is_credit')
         .eq('user_id', userId)
         .not('customer_name', 'is', null);
-
-    double total = 0;
-    for (final bill in (res as List)) {
+    for (final bill in (billRes as List)) {
       final amount = (bill['total_amount'] as num?)?.toDouble() ?? 0;
       total += bill['is_credit'] == true ? amount : -amount;
     }
+
+    // Opening balances — secondary; if this query fails, return bills-only total
+    // rather than surfacing an error on the dashboard KPI.
+    try {
+      final custRes = await _client
+          .from('customers')
+          .select('opening_balance')
+          .eq('user_id', userId);
+      for (final c in (custRes as List)) {
+        total += (c['opening_balance'] as num?)?.toDouble() ?? 0;
+      }
+    } catch (_) {
+      // Customers table unavailable (RLS / network) — bills total is still valid.
+    }
+
     return total.clamp(0, double.infinity);
   }
 
@@ -183,28 +231,31 @@ class SupabaseService {
         .eq('user_id', userId)
         .not('customer_name', 'is', null);
 
-    // Aggregate bill amounts + last purchase date per customer name
+    // Aggregate bill amounts + last purchase date per customer name.
+    // Key is lowercased + trimmed so "Rahul" and "rahul " map to the same bucket
+    // (bug #58 — case-insensitive dedup must also apply here, not just fetchCustomerNames).
     final Map<String, Map<String, dynamic>> agg = {};
     for (final bill in (billRes as List)) {
-      final name = bill['customer_name']?.toString() ?? '';
+      final name = bill['customer_name']?.toString().trim() ?? '';
       if (name.isEmpty) continue;
-      agg.putIfAbsent(name, () => {'credit': 0.0, 'paid': 0.0, 'lastDate': null});
+      final key = name.toLowerCase();
+      agg.putIfAbsent(key, () => {'credit': 0.0, 'paid': 0.0, 'lastDate': null});
       final amt = (bill['total_amount'] as num?)?.toDouble() ?? 0;
       if (bill['is_credit'] == true) {
-        agg[name]!['credit'] = (agg[name]!['credit'] as double) + amt;
+        agg[key]!['credit'] = (agg[key]!['credit'] as double) + amt;
       } else {
-        agg[name]!['paid'] = (agg[name]!['paid'] as double) + amt;
+        agg[key]!['paid'] = (agg[key]!['paid'] as double) + amt;
       }
       final date = DateTime.tryParse(bill['created_at'] as String? ?? '');
-      final existing = agg[name]!['lastDate'] as DateTime?;
+      final existing = agg[key]!['lastDate'] as DateTime?;
       if (date != null && (existing == null || date.isAfter(existing))) {
-        agg[name]!['lastDate'] = date;
+        agg[key]!['lastDate'] = date;
       }
     }
 
     final customers = (custRes as List).map((c) {
       final customer = Customer.fromMap(c);
-      final data = agg[customer.name];
+      final data = agg[customer.name.trim().toLowerCase()];
       if (data != null) {
         final credit = data['credit'] as double;
         final paid = data['paid'] as double;
@@ -365,7 +416,7 @@ class SupabaseService {
     if (userId == null) return 0;
 
     final now = DateTime.now();
-    final firstDay = DateTime(now.year, now.month, 1).toIso8601String();
+    final firstDay = DateTime(now.year, now.month, 1).toUtc().toIso8601String();
 
     final res = await _client
         .from('past_bills')

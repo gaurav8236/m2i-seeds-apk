@@ -41,7 +41,7 @@ class AuthService {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
     try {
-      final now = DateTime.now().toIso8601String();
+      final now = DateTime.now().toUtc().toIso8601String();
       await _supabase.from('users').upsert(
         {'id': user.id, 'created_at': now, 'updated_at': now},
         onConflict: 'id',

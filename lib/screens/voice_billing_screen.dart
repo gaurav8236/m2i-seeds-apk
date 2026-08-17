@@ -82,7 +82,8 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
         final profile = results[3] as Map<String, String?>;
         _shopName = profile['shop_name'] ?? '';
       });
-    } catch (_) {
+    } catch (e, stack) {
+      debugPrint('[VoiceBillingScreen] _loadData error: $e\n$stack');
       if (mounted) _showSnack('डेटा लोड नहीं हो सका, दोबारा कोशिश करें');
     }
   }
@@ -198,9 +199,30 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   }
 
   Future<void> _finalizeBill() async {
+    // ── Pre-flight validations ────────────────────────────────────────────────
+    // Credit bill requires a customer name (business rule)
+    if (_isCredit && _customerName.trim().isEmpty) {
+      _showSnack('उधार के लिए ग्राहक का नाम ज़रूरी है');
+      return;
+    }
+
+    // Discount must not exceed the effective subtotal (bug #54)
+    final validSubTotal = _billItems
+        .where((i) => i.itemName.isNotEmpty && !i.hasError)
+        .fold(0.0, (s, i) => s + i.itemTotal);
+    if (_discount > validSubTotal && validSubTotal > 0) {
+      _showSnack('छूट ₹${_discount.toStringAsFixed(0)} कुल राशि ₹${validSubTotal.toStringAsFixed(0)} से अधिक है');
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     setState(() => _isProcessing = true);
     try {
-      final validItems = _billItems.where((i) => i.itemName.isNotEmpty).toList();
+      // Exclude error items (unrecognised voice results with stockId=null / price=0)
+      // to prevent null constraint violations in the checkout API (bug #33 follow-on).
+      final validItems = _billItems
+          .where((i) => i.itemName.isNotEmpty && !i.hasError)
+          .toList();
       final subTotal = validItems.fold(0.0, (s, i) => s + i.itemTotal);
       final finalTotal = (subTotal - _discount).clamp(0.0, double.infinity);
 
@@ -659,8 +681,21 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
         ? item.quantity.toInt().toString()
         : item.quantity.toStringAsFixed(1);
 
+    // Stock warning: item found but qty exceeds available stock (bug #33)
+    final bool hasStockWarning = !item.hasError &&
+        item.itemName.isNotEmpty &&
+        item.currentStock > 0 &&
+        item.quantity > item.currentStock;
+    final bool isOutOfStock = !item.hasError &&
+        item.itemName.isNotEmpty &&
+        item.currentStock <= 0;
+
     return Container(
-      color: item.hasError ? AppColors.dangerLight : null,
+      color: item.hasError
+          ? AppColors.dangerLight
+          : (hasStockWarning || isOutOfStock)
+              ? AppColors.warningLight // distinct from red (not-found)
+              : null,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -681,9 +716,15 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                       color: item.itemName.isEmpty ? AppColors.textMuted : AppColors.textPrimary,
                     ),
                   ),
-                  if (item.itemName.isNotEmpty)
+                  if (item.itemName.isNotEmpty && !hasStockWarning && !isOutOfStock)
                     Text('₹/${_getUnit(item)}',
                         style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                  if (isOutOfStock)
+                    const Text('⚠️ स्टॉक खत्म',
+                        style: TextStyle(fontSize: 10, color: AppColors.warning, fontWeight: FontWeight.w600)),
+                  if (hasStockWarning)
+                    Text('⚠️ सिर्फ ${item.currentStock.toInt()} बचे',
+                        style: const TextStyle(fontSize: 10, color: AppColors.warning, fontWeight: FontWeight.w600)),
                 ],
               ),
             ),
@@ -977,7 +1018,9 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                     contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     isDense: true,
                   ),
-                  onChanged: (v) => setState(() => _discount = double.tryParse(v) ?? 0),
+                  // Clamp to 0 — negative discount increases total (bug #53)
+                  onChanged: (v) => setState(() =>
+                      _discount = (double.tryParse(v) ?? 0).clamp(0, double.infinity)),
                 ),
               ),
             ],
@@ -1027,8 +1070,29 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
               width: double.infinity,
               child: ElevatedButton.icon(
                 onPressed: () {
-                  Analytics.billProceedCheckout(itemCount: _billItems.length);
-                  setState(() => _view = BillingView.settlement);
+                  // Check for stock issues before proceeding (bug #33)
+                  final stockIssues = _billItems
+                      .asMap()
+                      .entries
+                      .where((e) =>
+                          !e.value.hasError &&
+                          e.value.itemName.isNotEmpty &&
+                          (e.value.currentStock <= 0 || e.value.quantity > e.value.currentStock))
+                      .toList();
+
+                  if (stockIssues.isNotEmpty) {
+                    _showStockWarningSheet();
+                  } else {
+                    // Refresh customer names in the background so the settlement
+                    // dropdown includes customers added since this screen loaded (bug #46).
+                    SupabaseService.fetchCustomerNames().then((names) {
+                      if (mounted) setState(() => _customerNames = names);
+                    }).catchError((_) {
+                      // Network failure during refresh is non-fatal — existing list remains.
+                    });
+                    Analytics.billProceedCheckout(itemCount: _billItems.length);
+                    setState(() => _view = BillingView.settlement);
+                  }
                 },
                 icon: const Icon(Icons.receipt_long),
                 label: const Text('बिल सेटल करें →', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
@@ -1040,6 +1104,220 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // ── Stock warning sheet ─────────────────────────────────────────────────────
+
+  // No parameter — issues are recomputed live from _billItems inside the sheet.
+  void _showStockWarningSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setModal) {
+          // Rebuild live from _billItems so indices stay fresh after each removal/update.
+          final live = _billItems
+              .asMap()
+              .entries
+              .where((e) =>
+                  !e.value.hasError &&
+                  e.value.itemName.isNotEmpty &&
+                  (e.value.currentStock <= 0 || e.value.quantity > e.value.currentStock))
+              .toList();
+
+          final allFixed = live.isEmpty;
+
+          return Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Handle
+                Center(
+                  child: Container(
+                    width: 36, height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+
+                if (allFixed) ...[
+                  // ── All-clear state ──────────────────────────────────────────
+                  const SizedBox(height: 8),
+                  Center(
+                    child: Column(children: [
+                      Container(
+                        width: 56, height: 56,
+                        decoration: const BoxDecoration(
+                          color: AppColors.successLight,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.check_circle_outline, color: AppColors.success, size: 30),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text('सभी आइटम ठीक हो गए',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.success)),
+                      const SizedBox(height: 4),
+                      const Text('अब बिल सेटल कर सकते हैं',
+                          style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                      const SizedBox(height: 20),
+                    ]),
+                  ),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        Analytics.billProceedCheckout(itemCount: _billItems.length);
+                        setState(() => _view = BillingView.settlement);
+                      },
+                      icon: const Icon(Icons.receipt_long),
+                      label: const Text('बिल सेटल करें →',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.success,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ),
+                ] else ...[
+                  // ── Issue list ────────────────────────────────────────────────
+                  Row(children: [
+                    const Text('⚠️', style: TextStyle(fontSize: 18)),
+                    const SizedBox(width: 8),
+                    const Text('स्टॉक कम है',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.warning)),
+                  ]),
+                  const SizedBox(height: 4),
+                  const Text('इन आइटम का स्टॉक मांगी मात्रा से कम है:',
+                      style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                  const SizedBox(height: 12),
+
+                  ...live.map((e) {
+                    final idx = e.key;
+                    final item = e.value;
+                    final available = item.currentStock.toInt();
+                    final requested = item.quantity.toInt();
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.warningLight,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.warning.withValues(alpha: 0.35)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Text(item.itemName,
+                                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                              ),
+                              Text(
+                                available <= 0 ? 'स्टॉक खत्म' : 'मांगे: $requested  •  बचे: $available',
+                                style: const TextStyle(fontSize: 12, color: AppColors.warning,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(children: [
+                            if (available > 0) ...[
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: () {
+                                    _updateItem(idx, qty: item.currentStock);
+                                    setModal(() {});
+                                    setState(() {});
+                                  },
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: AppColors.warning,
+                                    side: BorderSide(color: AppColors.warning.withValues(alpha: 0.5)),
+                                    padding: const EdgeInsets.symmetric(vertical: 8),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                  child: Text('$available रखें',
+                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () {
+                                  _removeItem(idx);
+                                  setModal(() {});
+                                },
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: AppColors.danger,
+                                  side: const BorderSide(color: AppColors.danger),
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                                child: const Text('हटाएं',
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                              ),
+                            ),
+                          ]),
+                        ],
+                      ),
+                    );
+                  }),
+
+                  const SizedBox(height: 4),
+                  const Divider(),
+                  const SizedBox(height: 8),
+
+                  // Footer: back-to-fix + soft override
+                  Row(children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: const Text('बिल ठीक करें',
+                            style: TextStyle(fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          // Soft override — shopkeeper may know stock is physically
+                          // available but not yet updated in the app.
+                          Navigator.pop(ctx);
+                          Analytics.billProceedCheckout(itemCount: _billItems.length);
+                          setState(() => _view = BillingView.settlement);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.warning,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: const Text('फिर भी जारी रखें',
+                            style: TextStyle(fontWeight: FontWeight.w700, color: Colors.white)),
+                      ),
+                    ),
+                  ]),
+                ],
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -1121,7 +1399,10 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                             style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 0.6)),
                       ),
                     ),
-                    ..._billItems.asMap().entries.map((e) => Padding(
+                    // Only show valid (non-error) items — matches _finalizeBill filter.
+                    ..._billItems
+                        .where((i) => i.itemName.isNotEmpty && !i.hasError)
+                        .map((item) => Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1130,12 +1411,12 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                                 text: TextSpan(
                                   style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
                                   children: [
-                                    TextSpan(text: e.value.itemName, style: const TextStyle(fontWeight: FontWeight.w500)),
-                                    TextSpan(text: ' × ${e.value.quantity}', style: const TextStyle(color: AppColors.textMuted)),
+                                    TextSpan(text: item.itemName, style: const TextStyle(fontWeight: FontWeight.w500)),
+                                    TextSpan(text: ' × ${item.quantity}', style: const TextStyle(color: AppColors.textMuted)),
                                   ],
                                 ),
                               )),
-                              Text('₹${e.value.itemTotal.toStringAsFixed(0)}',
+                              Text('₹${item.itemTotal.toStringAsFixed(0)}',
                                   style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
                             ],
                           ),
