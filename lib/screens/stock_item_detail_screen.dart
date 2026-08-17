@@ -21,10 +21,14 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
   late final _nameCtrl = TextEditingController(text: widget.item.itemName);
   late final _categoryCtrl = TextEditingController(text: widget.item.category);
   late final _unitCtrl = TextEditingController(text: widget.item.unit);
-  late final _priceCtrl =
-      TextEditingController(text: widget.item.sellingPrice.toInt().toString());
+  late final _priceCtrl = TextEditingController(
+      text: widget.item.sellingPrice % 1 == 0
+          ? widget.item.sellingPrice.toInt().toString()
+          : widget.item.sellingPrice.toStringAsFixed(1));
   late final _stockCtrl = TextEditingController(
-      text: widget.item.currentStock.toInt().toString());
+      text: widget.item.currentStock % 1 == 0
+          ? widget.item.currentStock.toInt().toString()
+          : widget.item.currentStock.toStringAsFixed(1));
   late final _aliasCtrl = TextEditingController();
   late double _lowStockLimit = widget.item.lowStockLimit;
   late List<String> _aliases = List.from(widget.item.aliases);
@@ -63,6 +67,9 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
     }
   }
 
+  // Returns true if value has at most 1 decimal place (e.g. 39.5 ✓, 39.55 ✗)
+  bool _isOneDecimal(double v) => (v * 10).roundToDouble() == v * 10;
+
   Future<void> _save() async {
     final name = _nameCtrl.text.trim();
     final price = double.tryParse(_priceCtrl.text);
@@ -70,6 +77,21 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
     if (name.isEmpty || price == null || newStock == null) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('नाम, कीमत और स्टॉक भरें')));
+      return;
+    }
+    if (price < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('कीमत 0 से कम नहीं हो सकती')));
+      return;
+    }
+    if (newStock < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('स्टॉक 0 से कम नहीं हो सकता')));
+      return;
+    }
+    if (!_isOneDecimal(newStock)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('स्टॉक में एक दशमलव तक ही अनुमत है (जैसे: 39.5)')));
       return;
     }
 
