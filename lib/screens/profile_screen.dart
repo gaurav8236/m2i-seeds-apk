@@ -175,7 +175,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const Expanded(child: Center(child: CircularProgressIndicator()))
         else
           Expanded(
-            child: SingleChildScrollView(
+            // SafeArea(top:false) adds bottom inset so the save button is never
+            // hidden behind the home indicator on iPhone X+ devices (#18).
+            child: SafeArea(
+              top: false,
+              child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(children: [
                 // Editable fields
@@ -261,6 +265,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ]),
             ),
           ),
+          ), // SafeArea
       ]),
     );
   }

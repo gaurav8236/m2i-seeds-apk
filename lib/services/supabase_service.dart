@@ -236,48 +236,63 @@ class SupabaseService {
   // Total unpaid उधार across ALL customers — not period-filtered.
   // Includes customers.opening_balance so customers with pre-existing debt but
   // no bills are counted correctly on the dashboard KPI.
+  //
+  // Uses per-customer clamping (not a single aggregate clamp) so that an
+  // overpayment by Customer A never cancels Customer B's outstanding (#48).
   static Future<double> fetchTotalOutstanding() async {
     final userId = _userId;
     if (userId == null) return 0;
 
-    double total = 0;
+    // Aggregate credits and payments per customer name (case-insensitive key).
+    final Map<String, double> perCust = {};
 
-    // Bills query — primary source, must succeed.
+    // Bills — primary source, must succeed.
     final billRes = await _client
         .from('past_bills')
-        .select('total_amount, is_credit, transaction_type')
+        .select('customer_name, total_amount, is_credit, transaction_type')
         .eq('user_id', userId)
         .not('customer_name', 'is', null);
     for (final bill in (billRes as List)) {
+      final custName = bill['customer_name']?.toString().trim() ?? '';
+      if (custName.isEmpty) continue;
+      final key = custName.toLowerCase();
+      perCust.putIfAbsent(key, () => 0.0);
       final amount = (bill['total_amount'] as num?)?.toDouble() ?? 0;
       final txType = bill['transaction_type']?.toString();
       final resolvedType = (txType != null && txType.isNotEmpty)
           ? txType
           : (bill['is_credit'] == true ? 'credit' : 'sale');
-      // Only credit adds to outstanding; only payment subtracts.
-      // Cash sales ('sale') are settled at point-of-sale — neutral.
       if (resolvedType == 'credit') {
-        total += amount;
+        perCust[key] = perCust[key]! + amount;
       } else if (resolvedType == 'payment') {
-        total -= amount;
+        perCust[key] = perCust[key]! - amount;
       }
+      // 'sale' is settled at point-of-sale — neutral for outstanding.
     }
 
-    // Opening balances — secondary; if this query fails, return bills-only total
-    // rather than surfacing an error on the dashboard KPI.
+    // Opening balances — secondary; if this query fails, bills-only total is
+    // still valid and surfaced rather than crashing the dashboard KPI.
     try {
       final custRes = await _client
           .from('customers')
-          .select('opening_balance')
+          .select('name, opening_balance')
           .eq('user_id', userId);
       for (final c in (custRes as List)) {
-        total += (c['opening_balance'] as num?)?.toDouble() ?? 0;
+        final custName = c['name']?.toString().trim() ?? '';
+        if (custName.isEmpty) continue;
+        final key = custName.toLowerCase();
+        perCust.putIfAbsent(key, () => 0.0);
+        perCust[key] = perCust[key]! +
+            ((c['opening_balance'] as num?)?.toDouble() ?? 0);
       }
     } catch (_) {
       // Customers table unavailable (RLS / network) — bills total is still valid.
     }
 
-    return total.clamp(0, double.infinity);
+    // Sum with per-customer clamp so Customer A's overpayment cannot reduce
+    // Customer B's outstanding in the KPI (#48).
+    return perCust.values
+        .fold<double>(0.0, (sum, v) => sum + v.clamp(0.0, double.infinity));
   }
 
   // ── Customers ──────────────────────────────────────────────────────────────
@@ -557,25 +572,41 @@ class SupabaseService {
     });
   }
 
-  static Future<double> fetchItemSalesThisMonth(String stockId) async {
+  // [itemName] is optional and used as a fallback when stock_id in bill_details
+  // references a now-stale row (bills created before Sprint 5's ID-stabilisation fix).
+  static Future<double> fetchItemSalesThisMonth(
+    String stockId, {
+    String? itemName,
+  }) async {
     final userId = _userId;
     if (userId == null) return 0;
 
     final now = DateTime.now();
+    // DateTime(y, m, 1) is local (IST) midnight → .toUtc() is the correct
+    // IST boundary in UTC (e.g. "2024-12-31T18:30:00Z" = Jan 1 IST midnight).
     final firstDay = DateTime(now.year, now.month, 1).toUtc().toIso8601String();
+    // Upper bound: first of next month; DateTime handles month-13 overflow. (#19)
+    final monthEnd = DateTime(now.year, now.month + 1, 1).toUtc().toIso8601String();
 
     final res = await _client
         .from('past_bills')
         .select('bill_details')
         .eq('user_id', userId)
-        .gte('created_at', firstDay);
+        .gte('created_at', firstDay)
+        .lt('created_at', monthEnd); // defensive upper bound (#19)
 
+    final nameLower = itemName?.trim().toLowerCase();
     double totalQty = 0;
     for (final bill in (res as List)) {
       final details =
           List<Map<String, dynamic>>.from(bill['bill_details'] ?? []);
       for (final item in details) {
-        if (item['stock_id']?.toString() == stockId) {
+        final matchById   = item['stock_id']?.toString() == stockId;
+        // Fallback: match by item_name for pre-S5 bills where stock_id was
+        // stale after the old name-keyed upsert RPC duplicated items (#19).
+        final matchByName = nameLower != null &&
+            item['item_name']?.toString().trim().toLowerCase() == nameLower;
+        if (matchById || matchByName) {
           totalQty += (item['quantity_billed'] as num?)?.toDouble() ?? 0;
         }
       }

@@ -50,20 +50,30 @@ class _ReportsScreenState extends State<ReportsScreen>
   DateTimeRange _rangeFor(StatsPeriod p) {
     final now = DateTime.now();
     switch (p) {
+      // Use exclusive-midnight upper bounds for all periods — same pattern as the
+      // custom range fix (Sprint 6). DateTime handles day/month overflow correctly
+      // (e.g. day 32 → next month, month 13 → next year).  fetchFilteredStats
+      // converts these local (IST) DateTimes to UTC before the Supabase query. (#47)
       case StatsPeriod.today:
         return DateTimeRange(
-            start: DateTime(now.year, now.month, now.day), end: now);
+            start: DateTime(now.year, now.month, now.day),
+            end: DateTime(now.year, now.month, now.day + 1));
       case StatsPeriod.thisWeek:
         final monday = now.subtract(Duration(days: now.weekday - 1));
         return DateTimeRange(
-            start: DateTime(monday.year, monday.month, monday.day), end: now);
+            start: DateTime(monday.year, monday.month, monday.day),
+            end: DateTime(now.year, now.month, now.day + 1));
       case StatsPeriod.thisMonth:
         return DateTimeRange(
-            start: DateTime(now.year, now.month, 1), end: now);
+            start: DateTime(now.year, now.month, 1),
+            end: DateTime(now.year, now.month + 1, 1));
       case StatsPeriod.custom:
         final cr = _customRange;
         if (cr == null) {
-          return DateTimeRange(start: DateTime(now.year, now.month, 1), end: now);
+          // Null fallback uses thisMonth bounds — consistent exclusive midnight (#47)
+          return DateTimeRange(
+              start: DateTime(now.year, now.month, 1),
+              end: DateTime(now.year, now.month + 1, 1));
         }
         // The date picker returns `end` as midnight of the chosen day (exclusive
         // start of that day). We need to include the full chosen end-day, so

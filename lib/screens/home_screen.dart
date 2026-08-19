@@ -25,6 +25,7 @@ class _HomeScreenState extends State<HomeScreen> {
   StatsPeriod _period = StatsPeriod.thisMonth;
   String? _avatarUrl;
   String? _displayName;
+  String? _shopName; // #12 — shop name for header display
 
   @override
   void initState() {
@@ -36,19 +37,25 @@ class _HomeScreenState extends State<HomeScreen> {
   DateTimeRange _rangeFor(StatsPeriod p) {
     final now = DateTime.now();
     switch (p) {
+      // Exclusive-midnight upper bounds — same pattern as reports_screen and the
+      // custom range fix (Sprint 6). DateTime overflow is handled correctly by Dart. (#47)
       case StatsPeriod.today:
         return DateTimeRange(
-            start: DateTime(now.year, now.month, now.day), end: now);
+            start: DateTime(now.year, now.month, now.day),
+            end: DateTime(now.year, now.month, now.day + 1));
       case StatsPeriod.thisWeek:
         final monday = now.subtract(Duration(days: now.weekday - 1));
         return DateTimeRange(
-            start: DateTime(monday.year, monday.month, monday.day), end: now);
+            start: DateTime(monday.year, monday.month, monday.day),
+            end: DateTime(now.year, now.month, now.day + 1));
       case StatsPeriod.thisMonth:
         return DateTimeRange(
-            start: DateTime(now.year, now.month, 1), end: now);
+            start: DateTime(now.year, now.month, 1),
+            end: DateTime(now.year, now.month + 1, 1));
       case StatsPeriod.custom:
         return DateTimeRange(
-            start: DateTime(now.year, now.month, 1), end: now);
+            start: DateTime(now.year, now.month, 1),
+            end: DateTime(now.year, now.month + 1, 1));
     }
   }
 
@@ -76,6 +83,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _recentBills = bills.take(4).toList();
         _avatarUrl = profile['photo_url'];
         _displayName = profile['display_name'] ?? profile['google_name'];
+        _shopName = profile['shop_name']; // #12
       });
     } catch (e) {
       debugPrint('Home load error: $e');
@@ -155,15 +163,23 @@ class _HomeScreenState extends State<HomeScreen> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('SmartDukan',
-                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
-                                Text('दुकानदार सहायक',
-                                    style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 11)),
-                              ],
+                            // Expanded prevents long shop names from overflowing (#12)
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    (_shopName?.isNotEmpty == true) ? _shopName! : 'SmartDukan',
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
+                                  ),
+                                  Text('दुकानदार सहायक',
+                                      style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 11)),
+                                ],
+                              ),
                             ),
+                            const SizedBox(width: 8),
                             GestureDetector(
                               onTap: () => Navigator.push(context,
                                   MaterialPageRoute(builder: (_) => const ProfileScreen()))

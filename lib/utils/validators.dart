@@ -75,6 +75,19 @@ class Validators {
     return null;
   }
 
+  /// Custom unit free-text — only validated when user selects "अन्य" and types
+  /// their own unit. Rejects purely numeric strings (e.g. "10", "500") which
+  /// indicate a quantity was typed instead of a unit name (#4).
+  static String? unit(String? v) {
+    final s = v?.trim() ?? '';
+    if (s.isEmpty) return null; // unit is optional
+    if (s.length > 20) return 'इकाई 20 अक्षर से अधिक नहीं हो सकती';
+    if (double.tryParse(s) != null) {
+      return 'इकाई सिर्फ संख्या नहीं हो सकती (जैसे: किलो, पैकेट)';
+    }
+    return null;
+  }
+
   // ── Customers ─────────────────────────────────────────────────────────────
 
   /// Customer name — required, max 80 chars, no special chars (#37).

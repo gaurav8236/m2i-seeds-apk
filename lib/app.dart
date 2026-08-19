@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/home_screen.dart';
 import 'screens/voice_billing_screen.dart';
 import 'screens/inventory_screen.dart';
@@ -18,8 +17,6 @@ class _AppShellState extends State<AppShell> {
   int _currentIndex = 0;
   DateTime? _lastBackPress;
 
-  static const _tabKey = 'active_tab';
-
   // Each screen registers its reload fn here
   final Map<int, VoidCallback> _reloaders = {};
   VoidCallback? _lowStockTrigger;
@@ -27,15 +24,8 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
-    _restoreTab();
-  }
-
-  Future<void> _restoreTab() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getInt(_tabKey) ?? 0;
-    if (mounted && saved != 0) {
-      setState(() => _currentIndex = saved);
-    }
+    // Always start on the Home tab on cold start (#56).
+    // Tab state is intentionally NOT persisted across restarts.
   }
 
   void _registerReload(int tabIndex, VoidCallback fn) {
@@ -44,9 +34,6 @@ class _AppShellState extends State<AppShell> {
 
   void _changeTab(int index) {
     setState(() => _currentIndex = index);
-    // Fire-and-forget — no need to await, write completes in background
-    SharedPreferences.getInstance()
-        .then((prefs) => prefs.setInt(_tabKey, index));
     // Refresh the screen we're switching TO (skip VoiceBillingScreen tab 1)
     if (index != 1) {
       _reloaders[index]?.call();

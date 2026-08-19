@@ -96,8 +96,11 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
           ),
         ),
 
+        // SafeArea(top:false) so save button clears home indicator (#18)
         Expanded(
-          child: SingleChildScrollView(
+          child: SafeArea(
+            top: false,
+            child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Form(
               key: _formKey,
@@ -218,6 +221,7 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
               ),
             ),
           ),
+          ), // SafeArea
         ),
       ]),
     );

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/supabase_service.dart';
 import '../theme.dart';
+import '../utils/unit_categories.dart';
 import '../utils/validators.dart';
 import 'stock_item_detail_screen.dart';
 
@@ -23,8 +24,7 @@ class _InventoryScreenState extends State<InventoryScreen>
   bool _loading = true;
 
   // ── Add form ───────────────────────────────────────────────────────────────
-  static const _kCategories = ['अनाज', 'दाल', 'तेल/घी', 'मसाले', 'आटा/सूजी', 'चीनी/नमक', 'बिस्कुट/नाश्ता', 'साबुन/सफाई', 'पेय पदार्थ', 'अन्य'];
-  static const _kUnits = ['किलो', 'ग्राम', 'लीटर', 'मिली', 'पैकेट', 'पीस', 'बोतल', 'थैला', 'दर्जन', 'अन्य'];
+  // kCategories / kUnits imported from unit_categories.dart (bilingual, Sprint 8)
 
   final _nameCtrl     = TextEditingController();
   final _categoryCtrl = TextEditingController();
@@ -112,17 +112,30 @@ class _InventoryScreenState extends State<InventoryScreen>
 
   void _selectStock(StockItem s) {
     _suppressSuggestions = true;
-    _nameCtrl.text     = s.itemName;
-    _categoryCtrl.text = s.category;
-    _unitCtrl.text     = s.unit;
-    _priceCtrl.text    = s.sellingPrice.toInt().toString();
-    _stockCtrl.text    = s.currentStock.toInt().toString();
+    // Normalize stored values to canonical Hindi before populating the form.
+    // Moving all assignments inside setState prevents a one-frame mismatch
+    // where _selCategory was already updated but the free-text field still
+    // showed stale controller text (#17).
+    final normCat  = normalizeCategory(s.category) ?? s.category;
+    final normUnit = normalizeUnit(s.unit) ?? s.unit;
     setState(() {
-      _lowStockLimit   = s.lowStockLimit;
-      _aliases         = List.from(s.aliases);
-      _showSuggestions = false;
-      _selCategory     = _kCategories.contains(s.category) ? s.category : (s.category.isNotEmpty ? 'अन्य' : null);
-      _selUnit         = _kUnits.contains(s.unit) ? s.unit : (s.unit.isNotEmpty ? 'अन्य' : null);
+      _nameCtrl.text     = s.itemName;
+      _categoryCtrl.text = normCat;
+      _unitCtrl.text     = normUnit;
+      // Preserve decimals — .toInt() truncated e.g. ₹12.50 → ₹12 (#27)
+      _priceCtrl.text    = s.sellingPrice % 1 == 0
+          ? s.sellingPrice.toInt().toString()
+          : s.sellingPrice.toStringAsFixed(2);
+      _stockCtrl.text    = s.currentStock % 1 == 0
+          ? s.currentStock.toInt().toString()
+          : s.currentStock.toStringAsFixed(1);
+      _lowStockLimit     = s.lowStockLimit;
+      _aliases           = List.from(s.aliases);
+      _showSuggestions   = false;
+      _selCategory       = kCategories.any((c) => c.canonical == normCat)
+          ? normCat : (normCat.isNotEmpty ? 'अन्य' : null);
+      _selUnit           = kUnits.any((u) => u.canonical == normUnit)
+          ? normUnit : (normUnit.isNotEmpty ? 'अन्य' : null);
     });
     _nameFocus.unfocus();
     _suppressSuggestions = false;
@@ -130,17 +143,21 @@ class _InventoryScreenState extends State<InventoryScreen>
 
   void _selectMaster(MasterItem m) {
     _suppressSuggestions = true;
-    _nameCtrl.text     = m.name;
-    _categoryCtrl.text = m.category;
-    _unitCtrl.text     = m.unit;
-    _priceCtrl.clear();
-    _stockCtrl.clear();
+    final normCat  = normalizeCategory(m.category) ?? m.category;
+    final normUnit = normalizeUnit(m.unit) ?? m.unit;
     setState(() {
-      _lowStockLimit   = 10;
-      _aliases         = [];
-      _showSuggestions = false;
-      _selCategory     = _kCategories.contains(m.category) ? m.category : (m.category.isNotEmpty ? 'अन्य' : null);
-      _selUnit         = _kUnits.contains(m.unit) ? m.unit : (m.unit.isNotEmpty ? 'अन्य' : null);
+      _nameCtrl.text     = m.name;
+      _categoryCtrl.text = normCat;
+      _unitCtrl.text     = normUnit;
+      _priceCtrl.text    = '';
+      _stockCtrl.text    = '';
+      _lowStockLimit     = 10;
+      _aliases           = [];
+      _showSuggestions   = false;
+      _selCategory       = kCategories.any((c) => c.canonical == normCat)
+          ? normCat : (normCat.isNotEmpty ? 'अन्य' : null);
+      _selUnit           = kUnits.any((u) => u.canonical == normUnit)
+          ? normUnit : (normUnit.isNotEmpty ? 'अन्य' : null);
     });
     _nameFocus.unfocus();
     _suppressSuggestions = false;
@@ -162,25 +179,45 @@ class _InventoryScreenState extends State<InventoryScreen>
     final nameErr  = Validators.itemName(_nameCtrl.text);
     final priceErr = Validators.sellingPrice(_priceCtrl.text);
     final stockErr = Validators.currentStock(_stockCtrl.text);
-    final firstErr = nameErr ?? priceErr ?? stockErr;
+    // Resolve effective unit/category from dropdown selection or free-text field.
+    // Normalize to canonical Hindi before staging (#4 #23 bilingual Sprint 8).
+    final rawUnit     = _selUnit == 'अन्य'     ? _unitCtrl.text.trim()     : (_selUnit ?? '');
+    final rawCategory = _selCategory == 'अन्य' ? _categoryCtrl.text.trim() : (_selCategory ?? '');
+    final unitErr  = Validators.unit(rawUnit); // rejects purely numeric values (#4)
+    final firstErr = nameErr ?? priceErr ?? stockErr ?? unitErr;
     if (firstErr != null) { _snack(firstErr); return; }
-    final name  = _nameCtrl.text.trim();
-    final price = double.parse(_priceCtrl.text.trim());
-    final stock = double.parse(_stockCtrl.text.trim());
+
+    final name     = _nameCtrl.text.trim();
+    final price    = double.parse(_priceCtrl.text.trim());
+    final stock    = double.parse(_stockCtrl.text.trim());
+    final unit     = normalizeUnit(rawUnit)      ?? rawUnit;
+    final category = normalizeCategory(rawCategory) ?? rawCategory;
+
+    // Detect if this is an update to an existing stock item so the user
+    // sees clear feedback instead of a silent upsert (#25).
+    final isUpdate = _stock.any(
+        (s) => s.itemName.trim().toLowerCase() == name.toLowerCase());
+
     setState(() {
       _preview.add({
         'item_name':       name,
-        'category':        _categoryCtrl.text.trim(),
-        'unit':            _unitCtrl.text.trim(),
+        'category':        category,
+        'unit':            unit,
         'selling_price':   price,
         'current_stock':   stock,
         'low_stock_limit': _lowStockLimit,
         'aliases':         List.from(_aliases),
         'cost_price':      0.0,
         'image_url':       null,
+        '_is_update':      isUpdate, // UI-only flag, stripped before DB call
       });
       _clearForm();
     });
+
+    // Immediate toast so the user knows this is an update, not a new item (#25)
+    if (isUpdate) {
+      _snack('$name पहले से है — कीमत और स्टॉक अपडेट होगा');
+    }
   }
 
   void _clearForm() {
@@ -201,15 +238,31 @@ class _InventoryScreenState extends State<InventoryScreen>
 
   Future<void> _submitAll() async {
     if (_preview.isEmpty) return;
+
+    // Count before clearing; strip UI-only '_is_update' flag before DB call (#25)
+    final updateCount = _preview.where((e) => e['_is_update'] == true).length;
+    final addCount    = _preview.length - updateCount;
+    final dbItems = _preview.map((e) {
+      final copy = Map<String, dynamic>.from(e)..remove('_is_update');
+      return copy;
+    }).toList();
+
     setState(() => _submitting = true);
     try {
-      await SupabaseService.upsertInventoryItems(List.from(_preview));
+      await SupabaseService.upsertInventoryItems(dbItems);
       if (!mounted) return;
       setState(() => _preview.clear());
       await _load();
       if (!mounted) return;
       _tabCtrl.animateTo(1);
-      _snack('सभी आइटम सफलतापूर्वक जोड़े गए!');
+      // Context-aware success message (#25)
+      if (updateCount > 0 && addCount > 0) {
+        _snack('$addCount नए जोड़े, $updateCount अपडेट हुए');
+      } else if (updateCount > 0) {
+        _snack('$updateCount सामान अपडेट हुए');
+      } else {
+        _snack('$addCount सामान सफलतापूर्वक जोड़े गए!');
+      }
     } catch (e) {
       if (mounted) _snack('सेव नहीं हो सका: $e');
     } finally {
@@ -398,7 +451,7 @@ class _InventoryScreenState extends State<InventoryScreen>
             const SizedBox(height: 4),
             _dropdownField(
               value: _selCategory,
-              items: _kCategories,
+              items: kCategories,
               hint: 'चुनें',
               onChanged: (v) => setState(() {
                 _selCategory = v;
@@ -424,7 +477,7 @@ class _InventoryScreenState extends State<InventoryScreen>
             const SizedBox(height: 4),
             _dropdownField(
               value: _selUnit,
-              items: _kUnits,
+              items: kUnits,
               hint: 'चुनें',
               onChanged: (v) => setState(() {
                 _selUnit = v;
@@ -622,6 +675,27 @@ class _InventoryScreenState extends State<InventoryScreen>
                   '₹${e.value['selling_price']} · स्टॉक: ${e.value['current_stock']} ${e.value['unit'] ?? ''}',
                   style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
             ])),
+            // Show whether this is a new add or an update to existing item (#25)
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: e.value['_is_update'] == true
+                    ? const Color(0xFFFFF3CD)
+                    : AppColors.primaryLight,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                e.value['_is_update'] == true ? 'अपडेट' : 'नया',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: e.value['_is_update'] == true
+                      ? const Color(0xFF856404)
+                      : AppColors.primary,
+                ),
+              ),
+            ),
             GestureDetector(
               onTap: () => setState(() => _preview.removeAt(e.key)),
               child: const Icon(Icons.delete_outline, color: AppColors.danger, size: 18),
@@ -840,9 +914,11 @@ class _InventoryScreenState extends State<InventoryScreen>
           fontSize: 12, fontWeight: FontWeight.w700,
           color: AppColors.textSecondary));
 
+  // Each item shows "किलो / KG" but the dropdown value is the canonical Hindi
+  // string ("किलो") — the same value that gets written to the DB.
   Widget _dropdownField({
     required String? value,
-    required List<String> items,
+    required List<UnitCategoryItem> items,
     required String hint,
     required void Function(String?) onChanged,
   }) {
@@ -865,7 +941,7 @@ class _InventoryScreenState extends State<InventoryScreen>
         icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.textMuted, size: 18),
         style: const TextStyle(color: AppColors.textPrimary, fontSize: 13, fontWeight: FontWeight.w500),
         items: items
-            .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+            .map((e) => DropdownMenuItem(value: e.canonical, child: Text(e.dropdownLabel)))
             .toList(),
         onChanged: onChanged,
       ),

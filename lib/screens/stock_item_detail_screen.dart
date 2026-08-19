@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/supabase_service.dart';
 import '../theme.dart';
+import '../utils/unit_categories.dart';
 import '../utils/validators.dart';
 
 class StockItemDetailScreen extends StatefulWidget {
@@ -19,9 +20,15 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
   double _soldThisMonth = 0;
   StockHistoryEntry? _lastRestock;
 
+  // Category and unit dropdowns — initialized in initState after normalization.
+  // Declared separately (not late final with inline init) so we can assign
+  // the normalized canonical value before the first build (#23 bilingual Sprint 8).
+  late final TextEditingController _categoryCtrl;
+  late final TextEditingController _unitCtrl;
+  String? _selCategory;
+  String? _selUnit;
+
   late final _nameCtrl = TextEditingController(text: widget.item.itemName);
-  late final _categoryCtrl = TextEditingController(text: widget.item.category);
-  late final _unitCtrl = TextEditingController(text: widget.item.unit);
   late final _priceCtrl = TextEditingController(
       text: widget.item.sellingPrice % 1 == 0
           ? widget.item.sellingPrice.toInt().toString()
@@ -37,6 +44,16 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
   @override
   void initState() {
     super.initState();
+    // Normalize the stored value (may be "kg", "KG", etc.) to canonical Hindi
+    // before populating dropdowns and text controllers (#23 bilingual Sprint 8).
+    final normCat  = normalizeCategory(widget.item.category) ?? widget.item.category;
+    final normUnit = normalizeUnit(widget.item.unit)          ?? widget.item.unit;
+    _categoryCtrl = TextEditingController(text: normCat);
+    _unitCtrl     = TextEditingController(text: normUnit);
+    _selCategory  = kCategories.any((c) => c.canonical == normCat)
+        ? normCat : (normCat.isNotEmpty ? 'अन्य' : null);
+    _selUnit      = kUnits.any((u) => u.canonical == normUnit)
+        ? normUnit : (normUnit.isNotEmpty ? 'अन्य' : null);
     _loadInsights();
   }
 
@@ -55,7 +72,8 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
     if (widget.item.id.isEmpty) return;
     try {
       final results = await Future.wait([
-        SupabaseService.fetchItemSalesThisMonth(widget.item.id),
+        SupabaseService.fetchItemSalesThisMonth(
+            widget.item.id, itemName: widget.item.itemName),
         SupabaseService.fetchLastRestock(widget.item.id),
       ]);
       if (mounted) setState(() {
@@ -69,18 +87,25 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
   }
 
   Future<void> _save() async {
-    final nameErr = Validators.itemName(_nameCtrl.text);
+    // Resolve effective unit/category from dropdown selection or free-text field.
+    final rawUnit     = _selUnit == 'अन्य'     ? _unitCtrl.text.trim()     : (_selUnit ?? '');
+    final rawCategory = _selCategory == 'अन्य' ? _categoryCtrl.text.trim() : (_selCategory ?? '');
+    final nameErr  = Validators.itemName(_nameCtrl.text);
     final priceErr = Validators.sellingPrice(_priceCtrl.text);
     final stockErr = Validators.currentStock(_stockCtrl.text);
-    final firstErr = nameErr ?? priceErr ?? stockErr;
+    final unitErr  = Validators.unit(rawUnit); // rejects purely numeric values (#4)
+    final firstErr = nameErr ?? priceErr ?? stockErr ?? unitErr;
     if (firstErr != null) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(firstErr)));
       return;
     }
-    final name     = _nameCtrl.text.trim();
-    final price    = double.parse(_priceCtrl.text.trim());
-    final newStock = double.parse(_stockCtrl.text.trim());
+    final name             = _nameCtrl.text.trim();
+    final price            = double.parse(_priceCtrl.text.trim());
+    final newStock         = double.parse(_stockCtrl.text.trim());
+    // Normalize to canonical Hindi before writing to DB (bilingual Sprint 8).
+    final canonicalUnit     = normalizeUnit(rawUnit)         ?? rawUnit;
+    final canonicalCategory = normalizeCategory(rawCategory) ?? rawCategory;
 
     // Guard against double-tap: set _saving before any async work so a
     // second tap while the name-check is in flight is a no-op.
@@ -120,8 +145,8 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
       await SupabaseService.updateInventoryItem(
         stockId: widget.item.id,
         itemName: name,
-        category: _categoryCtrl.text.trim(),
-        unit: _unitCtrl.text.trim(),
+        category: canonicalCategory,
+        unit: canonicalUnit,
         sellingPrice: price,
         currentStock: newStock,
         lowStockLimit: _lowStockLimit,
@@ -206,8 +231,11 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
           ),
         ),
 
+        // SafeArea(top:false) so save button clears home indicator (#18)
         Expanded(
-          child: SingleChildScrollView(
+          child: SafeArea(
+            top: false,
+            child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(children: [
               // ── Edit fields ──────────────────────────────────────────────
@@ -217,21 +245,48 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
                 TextField(controller: _nameCtrl,
                     decoration: const InputDecoration(isDense: true)),
                 const SizedBox(height: 14),
+                // Category + Unit — bilingual dropdowns (#23 Sprint 8)
                 Row(children: [
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     _lbl('श्रेणी'),
                     const SizedBox(height: 6),
-                    TextField(controller: _categoryCtrl,
-                        decoration: const InputDecoration(
-                            hintText: 'अनाज', isDense: true)),
+                    _dropdownField(
+                      value: _selCategory,
+                      items: kCategories,
+                      hint: 'चुनें',
+                      onChanged: (v) => setState(() {
+                        _selCategory = v;
+                        if (v != null && v != 'अन्य') _categoryCtrl.text = v;
+                        else if (v == 'अन्य') _categoryCtrl.text = '';
+                      }),
+                    ),
+                    if (_selCategory == 'अन्य') ...[
+                      const SizedBox(height: 6),
+                      TextField(controller: _categoryCtrl,
+                          decoration: const InputDecoration(
+                              hintText: 'श्रेणी लिखें...', isDense: true)),
+                    ],
                   ])),
                   const SizedBox(width: 10),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     _lbl('इकाई'),
                     const SizedBox(height: 6),
-                    TextField(controller: _unitCtrl,
-                        decoration: const InputDecoration(
-                            hintText: 'किलो', isDense: true)),
+                    _dropdownField(
+                      value: _selUnit,
+                      items: kUnits,
+                      hint: 'चुनें',
+                      onChanged: (v) => setState(() {
+                        _selUnit = v;
+                        if (v != null && v != 'अन्य') _unitCtrl.text = v;
+                        else if (v == 'अन्य') _unitCtrl.text = '';
+                      }),
+                    ),
+                    if (_selUnit == 'अन्य') ...[
+                      const SizedBox(height: 6),
+                      TextField(controller: _unitCtrl,
+                          decoration: const InputDecoration(
+                              hintText: 'इकाई लिखें...', isDense: true)),
+                    ],
                   ])),
                 ]),
                 const SizedBox(height: 14),
@@ -411,7 +466,8 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
                 ),
               ),
             ]),
-          ),
+            ), // SingleChildScrollView
+          ), // SafeArea
         ),
       ]),
     );
@@ -460,6 +516,41 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
         border: Border.all(color: AppColors.border),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
+    );
+  }
+
+  // Each item shows "किलो / KG" but value is the canonical Hindi string (#23)
+  Widget _dropdownField({
+    required String? value,
+    required List<UnitCategoryItem> items,
+    required String hint,
+    required void Function(String?) onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: DropdownButton<String>(
+        value: value,
+        hint: Text(hint,
+            style: const TextStyle(
+                color: Color(0xFFB0BAC8), fontSize: 13,
+                fontStyle: FontStyle.italic)),
+        isExpanded: true,
+        underline: const SizedBox.shrink(),
+        icon: const Icon(Icons.keyboard_arrow_down,
+            color: AppColors.textMuted, size: 18),
+        style: const TextStyle(
+            color: AppColors.textPrimary, fontSize: 13,
+            fontWeight: FontWeight.w500),
+        items: items
+            .map((e) => DropdownMenuItem(
+                value: e.canonical, child: Text(e.dropdownLabel)))
+            .toList(),
+        onChanged: onChanged,
+      ),
     );
   }
 
