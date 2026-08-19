@@ -216,8 +216,8 @@ class SupabaseService {
       if (data != null) {
         final credit = data['credit'] as double;
         final paid = data['paid'] as double;
-        customer.outstanding =
-            (customer.openingBalance + credit - paid).clamp(0, double.infinity);
+        // Allow negative: customer has a credit balance (advance deposit / overpayment)
+        customer.outstanding = customer.openingBalance + credit - paid;
         customer.lastPurchaseAt = data['lastDate'] as DateTime?;
       } else {
         customer.outstanding = customer.openingBalance;
@@ -273,20 +273,25 @@ class SupabaseService {
         .select('total_amount, is_credit, nagad_amount, transaction_type, created_at')
         .eq('user_id', userId)
         .eq('customer_name', customerName)
-        .order('created_at', ascending: false);
+        .order('created_at', ascending: true); // ascending: running-balance computation needs oldest-first
 
     return (res as List).map((bill) {
       final isCredit = bill['is_credit'] == true;
       final nagad = (bill['nagad_amount'] as num?)?.toDouble() ?? 0;
       final txType = bill['transaction_type'] as String? ?? '';
-      // Determine display type: split when credit bill has a nagad portion
-      final String type = (!isCredit && txType == 'payment')
-          ? 'payment'
-          : (isCredit && nagad > 0)
-              ? 'split'
-              : isCredit
-                  ? 'credit'
-                  : 'cash';
+      // Determine display type
+      final String type;
+      if (!isCredit && txType == 'payment') {
+        type = 'payment';
+      } else if (!isCredit && txType == 'deposit') {
+        type = 'deposit';
+      } else if (isCredit && nagad > 0) {
+        type = 'split';
+      } else if (isCredit) {
+        type = 'credit';
+      } else {
+        type = 'cash';
+      }
       return {
         'type': type,
         'amount': (bill['total_amount'] as num?)?.toDouble() ?? 0,
@@ -312,6 +317,7 @@ class SupabaseService {
         'discount_amount': 0,
         'customer_name': customerName,
         'is_credit': false,
+        'transaction_type': 'payment',
         'items': [
           {
             'stock_id': null,
@@ -328,6 +334,45 @@ class SupabaseService {
 
     if (response.statusCode != 200) {
       throw Exception('Payment failed: ${response.statusCode}');
+    }
+  }
+
+  // Record an advance deposit — customer pays in ahead of any bill.
+  // Stored as transaction_type='deposit', is_credit=false.
+  // Reduces outstanding; if it exceeds balance, outstanding goes negative (credit).
+  static Future<void> recordDeposit({
+    required String customerName,
+    required double amount,
+  }) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Not authenticated');
+
+    final response = await http.post(
+      Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-checkout/'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'user_id': userId,
+        'total_bill_amount': amount,
+        'discount_amount': 0,
+        'customer_name': customerName,
+        'is_credit': false,
+        'transaction_type': 'deposit',
+        'items': [
+          {
+            'stock_id': null,
+            'new_stock': null,
+            'item_name': 'अग्रिम जमा (Advance Deposit)',
+            'quantity_billed': 1,
+            'price_per_unit': amount,
+            'item_total': amount,
+            'error': false,
+          }
+        ],
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Deposit failed: ${response.statusCode}');
     }
   }
 
