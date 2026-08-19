@@ -61,9 +61,25 @@ class _ReportsScreenState extends State<ReportsScreen>
         return DateTimeRange(
             start: DateTime(now.year, now.month, 1), end: now);
       case StatsPeriod.custom:
-        return _customRange ??
-            DateTimeRange(
-                start: DateTime(now.year, now.month, 1), end: now);
+        final cr = _customRange;
+        if (cr == null) {
+          return DateTimeRange(start: DateTime(now.year, now.month, 1), end: now);
+        }
+        // The date picker returns `end` as midnight of the chosen day (exclusive
+        // start of that day). We need to include the full chosen end-day, so
+        // advance to midnight of the NEXT day — the exclusive upper bound.
+        //
+        // _filteredBills adds Duration(days:1) to range.end before comparing, so
+        // using 23:59:59 here would cause it to include one extra day.  Midnight-
+        // of-next-day is the correct value: server query gets all IST bills up to
+        // 23:59:59 on the end-day; client filter gets midnight+1-day which is a
+        // harmless ceiling since no future bills exist (#16).
+        //
+        // DateTime handles day overflow correctly (e.g. day 32 → next month).
+        return DateTimeRange(
+          start: cr.start,
+          end: DateTime(cr.end.year, cr.end.month, cr.end.day + 1),
+        );
     }
   }
 
@@ -742,18 +758,37 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: () async {
-                  // Validate name — empty name breaks ledger lookup (bug #60)
-                  if (nameCtrl.text.trim().isEmpty) {
+                  // Full validation (#37 #41 #51)
+                  final nameErr = Validators.customerName(nameCtrl.text);
+                  final phoneErr = Validators.phone(phoneCtrl.text);
+                  final balErr = Validators.openingBalance(balCtrl.text);
+                  final firstErr = nameErr ?? phoneErr ?? balErr;
+                  if (firstErr != null) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('नाम ज़रूरी है')));
+                        SnackBar(content: Text(firstErr)));
                     return;
+                  }
+                  final newName = nameCtrl.text.trim();
+                  // Name-change uniqueness check (#41): don't allow rename
+                  // to a name that already belongs to a different customer.
+                  if (newName.toLowerCase() != _customer.name.trim().toLowerCase()) {
+                    final exists = await SupabaseService.checkCustomerNameExists(
+                        newName, excludeId: _customer.id);
+                    if (!mounted) return;
+                    if (exists) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                              content: Text(
+                                  '\'$newName\' नाम का ग्राहक पहले से है')));
+                      return;
+                    }
                   }
                   Navigator.pop(ctx);
                   try {
                     await SupabaseService.updateCustomer(
                       id: _customer.id,
                       oldName: _customer.name,   // cascade rename to past_bills (#52)
-                      name: nameCtrl.text.trim(),
+                      name: newName,
                       phone: phoneCtrl.text.trim().isEmpty
                           ? null
                           : phoneCtrl.text.trim(),
@@ -764,7 +799,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                     setState(() {
                       _customer = Customer(
                         id: _customer.id,
-                        name: nameCtrl.text.trim(),
+                        name: newName,
                         phone: phoneCtrl.text.trim().isEmpty
                             ? null
                             : phoneCtrl.text.trim(),
@@ -777,6 +812,9 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                     });
                     ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('जानकारी अपडेट हो गई')));
+                    // Reload ledger so cascade-renamed past_bills entries
+                    // appear under the new name immediately.
+                    _load();
                   } catch (e) {
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(

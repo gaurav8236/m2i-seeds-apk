@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
 import '../models/models.dart';
 import '../services/auth_service.dart';
@@ -175,7 +176,12 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
     Analytics.billItemRemoved();
     final items = [..._billItems];
     items.removeAt(i);
-    setState(() => _billItems = items);
+    final newSubTotal = items.fold(0.0, (s, item) => s + item.itemTotal);
+    setState(() {
+      _billItems = items;
+      // Reset discount when the new subtotal drops below it (#34)
+      if (_discount > newSubTotal) _discount = 0;
+    });
   }
 
   void _addBlankItem() {
@@ -1011,16 +1017,23 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
               SizedBox(
                 width: 100,
                 child: TextField(
-                  keyboardType: TextInputType.number,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   textAlign: TextAlign.right,
                   decoration: const InputDecoration(
                     prefixText: '₹',
                     contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     isDense: true,
                   ),
-                  // Clamp to 0 — negative discount increases total (bug #53)
-                  onChanged: (v) => setState(() =>
-                      _discount = (double.tryParse(v) ?? 0).clamp(0, double.infinity)),
+                  // Restrict to digits and one decimal point (#35).
+                  // Clamp to 0 — negative discount increases total (#53).
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
+                  ],
+                  onChanged: (v) {
+                    final n = double.tryParse(v);
+                    if (v.isNotEmpty && n == null) return; // silently ignore junk
+                    setState(() => _discount = (n ?? 0).clamp(0, double.infinity));
+                  },
                 ),
               ),
             ],

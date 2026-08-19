@@ -524,6 +524,39 @@ class SupabaseService {
   }
 
   // Units of a stock item sold this calendar month — scanned from bill_details
+  // Returns true if a customer with [name] (case-insensitive) already exists
+  // for this user, ignoring the customer with [excludeId] (for rename check #41).
+  static Future<bool> checkCustomerNameExists(String name, {String? excludeId}) async {
+    final userId = _userId;
+    if (userId == null) return false;
+    // ilike = case-insensitive — catches "Ram" / "ram" / "RAM" as the same name.
+    // excludeId filters out the customer being renamed so a no-op rename passes.
+    final res = await _client
+        .from('customers')
+        .select('id')
+        .eq('user_id', userId)
+        .ilike('name', name.trim());
+    if (excludeId == null) return (res as List).isNotEmpty;
+    return (res as List).any((row) => row['id']?.toString() != excludeId);
+  }
+
+  // Returns true if another user_stock item (different id) already has [name]
+  // (case-insensitive) for this user — used to prevent duplicate items (#32).
+  static Future<bool> checkItemNameExists(String name, {required String excludeStockId}) async {
+    final userId = _userId;
+    if (userId == null) return false;
+    final res = await _client
+        .from('user_stock')
+        .select('id, master_inventory!inner(item_name)')
+        .eq('user_id', userId);
+    final nameLower = name.trim().toLowerCase();
+    return (res as List).any((row) {
+      if (row['id']?.toString() == excludeStockId) return false;
+      final itemName = row['master_inventory']?['item_name']?.toString() ?? '';
+      return itemName.trim().toLowerCase() == nameLower;
+    });
+  }
+
   static Future<double> fetchItemSalesThisMonth(String stockId) async {
     final userId = _userId;
     if (userId == null) return 0;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../theme.dart';
+import '../utils/validators.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -43,6 +44,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _save() async {
+    // Validate before hitting the network (#10 #11 #14)
+    final nameErr = Validators.displayName(_nameCtrl.text);
+    final shopErr = Validators.shopName(_shopCtrl.text);
+    final firstErr = nameErr ?? shopErr;
+    if (firstErr != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(firstErr)));
+      return;
+    }
+
     setState(() => _saving = true);
     try {
       await AuthService.updateProfile(

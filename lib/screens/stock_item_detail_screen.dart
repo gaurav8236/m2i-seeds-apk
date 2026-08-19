@@ -82,7 +82,27 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
     final price    = double.parse(_priceCtrl.text.trim());
     final newStock = double.parse(_stockCtrl.text.trim());
 
+    // Guard against double-tap: set _saving before any async work so a
+    // second tap while the name-check is in flight is a no-op.
     setState(() => _saving = true);
+
+    // Duplicate item-name check: warn before save if another item already has
+    // this name (case-insensitive) for this user (#32).
+    if (name.toLowerCase() != widget.item.itemName.trim().toLowerCase()) {
+      try {
+        final taken = await SupabaseService.checkItemNameExists(
+            name, excludeStockId: widget.item.id);
+        if (!mounted) return;
+        if (taken) {
+          setState(() => _saving = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('\'$name\' नाम का सामान पहले से है')));
+          return;
+        }
+      } catch (_) {
+        // Name-check failure is non-fatal — proceed with save.
+      }
+    }
     try {
       // Log restock if stock increased
       if (newStock > widget.item.currentStock && widget.item.id.isNotEmpty) {
@@ -125,7 +145,16 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
 
   void _addAlias() {
     final a = _aliasCtrl.text.trim();
-    if (a.isNotEmpty && !_aliases.contains(a)) {
+    // Validate length (#24)
+    final err = Validators.alias(a);
+    if (err != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+      return;
+    }
+    // Case-insensitive duplicate check (#30)
+    final aLower = a.toLowerCase();
+    final alreadyExists = _aliases.any((e) => e.toLowerCase() == aLower);
+    if (!alreadyExists) {
       setState(() => _aliases.add(a));
       _aliasCtrl.clear();
     }
