@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:printing/printing.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -31,6 +32,8 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
   List<String> _customerNames = [];
   double _discount = 0;
   bool _isCredit = false;
+  bool _isSplit = false;
+  final _nagadCtrl = TextEditingController();
   String _customerName = '';
   double _finalTotal = 0;
   String _currentDraftId = DateTime.now().millisecondsSinceEpoch.toString();
@@ -71,6 +74,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
     for (final c in _ringControllers) c.dispose();
     _breatheController.dispose();
     _customerController.dispose();
+    _nagadCtrl.dispose();
     VoiceService.dispose();
     super.dispose();
   }
@@ -281,12 +285,16 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
       final subTotal = validItems.fold(0.0, (s, i) => s + i.itemTotal);
       final finalTotal = (subTotal - _discount).clamp(0.0, double.infinity);
 
+      final nagad = _isSplit
+          ? (double.tryParse(_nagadCtrl.text) ?? 0).clamp(0, finalTotal).toDouble()
+          : 0.0;
       await SupabaseService.checkout(
         items: validItems.map((i) => i.toMap()).toList(),
         totalAmount: finalTotal,
         discountAmount: _discount,
         customerName: _customerName.isEmpty ? null : _customerName,
         isCredit: _isCredit,
+        nagadAmount: nagad,
       );
 
       await DraftService.deleteDraft(_currentDraftId);
@@ -314,18 +322,19 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
           pw.Center(child: pw.Text('दुकानदार सहायक', style: const pw.TextStyle(fontSize: 11))),
           pw.SizedBox(height: 10),
           pw.Divider(),
-          pw.Text('Date: ${DateTime.now().toString().split('.').first}'),
-          if (_customerName.isNotEmpty) pw.Text('Customer: $_customerName'),
+          pw.Text('दिनांक: ${DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now())}'),
+          if (_customerName.isNotEmpty) pw.Text('ग्राहक: $_customerName'),
+          pw.Text(_isCredit ? 'भुगतान: उधार' : 'भुगतान: नकद'),
           pw.Divider(),
           pw.Table(
             border: pw.TableBorder.all(width: 0.5),
             children: [
               pw.TableRow(children: [
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('Item', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('Unit', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('Rate', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('Qty', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('Total', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('आइटम', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('इकाई', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('दर', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('मात्रा', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('कुल', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
               ]),
               ..._billItems.map((item) => pw.TableRow(children: [
                 pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text(item.itemName)),
@@ -337,8 +346,8 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
             ],
           ),
           pw.SizedBox(height: 8),
-          if (_discount > 0) pw.Text('Discount: -₹${_discount.toStringAsFixed(2)}'),
-          pw.Text('Total: ₹${_finalTotal.toStringAsFixed(2)}',
+          if (_discount > 0) pw.Text('छूट: -₹${_discount.toStringAsFixed(2)}'),
+          pw.Text('कुल: ₹${_finalTotal.toStringAsFixed(2)}',
               style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14)),
           pw.SizedBox(height: 16),
           pw.Center(child: pw.Text('धन्यवाद! फिर पधारें।')),
@@ -355,6 +364,8 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
       _spokenText = '';
       _discount = 0;
       _isCredit = false;
+      _isSplit = false;
+      _nagadCtrl.clear();
       _customerName = '';
       _customerController.clear();
       _finalTotal = 0;
@@ -1152,11 +1163,80 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
                         ]),
                         Switch(
                           value: _isCredit,
-                          onChanged: (v) => setState(() => _isCredit = v),
+                          onChanged: (v) => setState(() {
+                            _isCredit = v;
+                            if (!v) { _isSplit = false; _nagadCtrl.clear(); }
+                          }),
                           activeColor: AppColors.primary,
                         ),
                       ],
                     ),
+
+                    // Split toggle — only visible when credit is on
+                    if (_isCredit) ...[
+                      const Divider(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text('कुछ नकद भी दिया?', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                            Text('Part cash + part credit', style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                          ]),
+                          Switch(
+                            value: _isSplit,
+                            onChanged: (v) => setState(() {
+                              _isSplit = v;
+                              if (!v) _nagadCtrl.clear();
+                            }),
+                            activeColor: Colors.orange.shade700,
+                          ),
+                        ],
+                      ),
+                      if (_isSplit) ...[
+                        const SizedBox(height: 10),
+                        Builder(builder: (ctx) {
+                          final subTotal = _billItems.fold(0.0, (s, i) => s + i.itemTotal);
+                          final finalTotal = (subTotal - _discount).clamp(0.0, double.infinity);
+                          final nagadAmt = double.tryParse(_nagadCtrl.text) ?? 0;
+                          final udharAmt = (finalTotal - nagadAmt).clamp(0.0, double.infinity);
+                          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            const Text('अभी नकद दिया (₹)',
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textMuted)),
+                            const SizedBox(height: 6),
+                            TextField(
+                              controller: _nagadCtrl,
+                              keyboardType: TextInputType.number,
+                              onChanged: (_) => setState(() {}),
+                              decoration: InputDecoration(
+                                prefixText: '₹ ',
+                                hintText: '0',
+                                isDense: true,
+                                suffixText: 'max ₹${finalTotal.toStringAsFixed(0)}',
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.shade50,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.orange.shade200),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('बकाया रहेगा:',
+                                      style: TextStyle(fontSize: 12, color: Colors.orange.shade800, fontWeight: FontWeight.w600)),
+                                  Text('₹${udharAmt.toStringAsFixed(0)}',
+                                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.orange.shade800)),
+                                ],
+                              ),
+                            ),
+                          ]);
+                        }),
+                      ],
+                    ],
+
                     const Divider(height: 24),
 
                     // Customer name

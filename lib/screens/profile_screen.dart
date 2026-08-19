@@ -12,6 +12,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   bool _loading = true;
   bool _saving = false;
+  bool _isDirty = false;
   String? _avatarUrl;
   String? _email;
   final _nameCtrl = TextEditingController();
@@ -49,6 +50,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         shopName: _shopCtrl.text.trim(),
       );
       if (mounted) {
+        setState(() => _isDirty = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('प्रोफ़ाइल सहेज दी गई')));
         Navigator.pop(context);
@@ -61,6 +63,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Future<void> _handleBack() async {
+    if (!_isDirty) { Navigator.pop(context); return; }
+    final leave = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('बदलाव छोड़ें?'),
+        content: const Text('सहेजे बिना जाने पर बदलाव खो जाएंगे।'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('रहने दें'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('छोड़ें',
+                style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if ((leave ?? false) && mounted) Navigator.pop(context);
   }
 
   Future<void> _logout() async {
@@ -85,7 +110,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) async {
+        if (didPop) return;
+        await _handleBack();
+      },
+      child: Scaffold(
       backgroundColor: AppColors.bg,
       body: Column(children: [
         // Header
@@ -104,7 +135,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Column(children: [
                 Row(children: [
                   IconButton(
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: _handleBack,
                     icon: const Icon(Icons.arrow_back, color: Colors.white),
                     style: IconButton.styleFrom(
                       backgroundColor: Colors.white.withOpacity(0.2),
@@ -181,6 +212,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       controller: _nameCtrl,
                       decoration: const InputDecoration(
                           hintText: 'आपका नाम', isDense: true),
+                      onChanged: (_) => setState(() => _isDirty = true),
                     ),
                     const SizedBox(height: 16),
                     _lbl('दुकान का नाम'),
@@ -189,6 +221,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       controller: _shopCtrl,
                       decoration: const InputDecoration(
                           hintText: 'उदा. राम किराना स्टोर', isDense: true),
+                      onChanged: (_) => setState(() => _isDirty = true),
                     ),
                     const SizedBox(height: 16),
                     _lbl('फ़ोन / ईमेल'),
@@ -250,7 +283,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
       ]),
-    );
+    ), // Scaffold
+    ); // PopScope
   }
 
   Widget _lbl(String t) => Text(t,

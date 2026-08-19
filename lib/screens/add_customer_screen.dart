@@ -15,6 +15,7 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
   final _phoneCtrl = TextEditingController();
   final _balanceCtrl = TextEditingController();
   bool _saving = false;
+  bool _isDirty = false;
 
   @override
   void dispose() {
@@ -33,6 +34,7 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
         phone: _phoneCtrl.text.trim().isEmpty ? null : _phoneCtrl.text.trim(),
         openingBalance: double.tryParse(_balanceCtrl.text) ?? 0,
       );
+      setState(() => _isDirty = false);
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
@@ -44,9 +46,38 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
     }
   }
 
+  Future<void> _handleBack() async {
+    if (!_isDirty) { Navigator.pop(context); return; }
+    final leave = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('बदलाव छोड़ें?'),
+        content: const Text('सहेजे बिना जाने पर बदलाव खो जाएंगे।'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('रहने दें'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('छोड़ें',
+                style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if ((leave ?? false) && mounted) Navigator.pop(context);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) async {
+        if (didPop) return;
+        await _handleBack();
+      },
+      child: Scaffold(
       backgroundColor: AppColors.bg,
       body: Column(children: [
         Container(
@@ -63,7 +94,7 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
               child: Row(children: [
                 IconButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: _handleBack,
                   icon: const Icon(Icons.arrow_back, color: Colors.white),
                   style: IconButton.styleFrom(
                     backgroundColor: Colors.white.withOpacity(0.2),
@@ -109,6 +140,7 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
                       hintText: 'जैसे: Ramesh Kumar',
                       prefixIcon: Icon(Icons.person_outline, size: 18),
                     ),
+                    onChanged: (_) => setState(() => _isDirty = true),
                     validator: (v) =>
                         v == null || v.trim().isEmpty ? 'नाम ज़रूरी है' : null,
                   ),
@@ -124,6 +156,7 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
                       hintText: '9876543210',
                       prefixIcon: Icon(Icons.phone_outlined, size: 18),
                     ),
+                    onChanged: (_) => setState(() => _isDirty = true),
                     validator: (v) {
                       if (v == null || v.isEmpty) return null;
                       if (v.length < 10) return 'सही नंबर डालें';
@@ -144,6 +177,7 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
                       prefixIcon: Icon(Icons.account_balance_wallet_outlined,
                           size: 18),
                     ),
+                    onChanged: (_) => setState(() => _isDirty = true),
                   ),
                   const SizedBox(height: 6),
                   Text(
@@ -181,7 +215,8 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
           ),
         ),
       ]),
-    );
+    ), // Scaffold
+    ); // PopScope
   }
 
   Widget _lbl(String t) => Text(t,

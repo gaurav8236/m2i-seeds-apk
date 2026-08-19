@@ -648,7 +648,12 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
   double get _outstanding {
     return _ledger.fold<double>(0, (s, e) {
       final amt = (e['amount'] as num?)?.toDouble() ?? 0;
-      return e['type'] == 'credit' ? s + amt : s - amt;
+      final nagad = (e['nagad_amount'] as num?)?.toDouble() ?? 0;
+      final type = e['type'] as String? ?? '';
+      if (type == 'credit') return s + amt;
+      if (type == 'split') return s + (amt - nagad).clamp(0, double.infinity);
+      if (type == 'payment') return s - amt;
+      return s; // 'cash' — no outstanding impact
     }).clamp(0, double.infinity);
   }
 
@@ -857,10 +862,42 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
   Widget _ledgerRow(Map<String, dynamic> entry) {
     final type = entry['type'] as String? ?? '';
     final amt = (entry['amount'] as num?)?.toDouble() ?? 0;
+    final nagad = (entry['nagad_amount'] as num?)?.toDouble() ?? 0;
     final date = entry['created_at'] != null
         ? DateTime.tryParse(entry['created_at'] as String)
         : null;
-    final isCredit = type == 'credit';
+
+    Color rowColor;
+    IconData rowIcon;
+    String rowLabel;
+    String trailingText;
+
+    switch (type) {
+      case 'split':
+        rowColor = Colors.orange.shade700;
+        rowIcon = Icons.call_split;
+        rowLabel = 'आंशिक नकद+उधार';
+        final udhar = (amt - nagad).clamp(0, double.infinity);
+        trailingText = '₹${nagad.toStringAsFixed(0)} नकद · ₹${udhar.toStringAsFixed(0)} उधार';
+        break;
+      case 'payment':
+        rowColor = AppColors.success;
+        rowIcon = Icons.arrow_downward;
+        rowLabel = 'भुगतान';
+        trailingText = '-₹${amt.toStringAsFixed(0)}';
+        break;
+      case 'cash':
+        rowColor = AppColors.success;
+        rowIcon = Icons.payments_outlined;
+        rowLabel = 'नकद बिक्री';
+        trailingText = '₹${amt.toStringAsFixed(0)}';
+        break;
+      default: // 'credit'
+        rowColor = AppColors.danger;
+        rowIcon = Icons.arrow_upward;
+        rowLabel = 'उधार';
+        trailingText = '+₹${amt.toStringAsFixed(0)}';
+    }
 
     return ListTile(
       contentPadding:
@@ -869,28 +906,22 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
         width: 36, height: 36,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: isCredit ? AppColors.dangerLight : AppColors.successLight,
+          color: rowColor.withOpacity(0.12),
         ),
-        child: Icon(
-          isCredit ? Icons.arrow_upward : Icons.arrow_downward,
-          size: 18,
-          color: isCredit ? AppColors.danger : AppColors.success,
-        ),
+        child: Icon(rowIcon, size: 18, color: rowColor),
       ),
-      title: Text(isCredit ? 'उधार' : 'भुगतान',
+      title: Text(rowLabel,
           style: TextStyle(
-              fontWeight: FontWeight.w600, fontSize: 13,
-              color: isCredit ? AppColors.danger : AppColors.success)),
+              fontWeight: FontWeight.w600, fontSize: 13, color: rowColor)),
       subtitle: date != null
-          ? Text(DateFormat('dd MMM, hh:mm a').format(date),
+          ? Text(DateFormat('dd MMM, hh:mm a').format(date.toLocal()),
               style: const TextStyle(
                   fontSize: 11, color: AppColors.textMuted))
           : null,
       trailing: Text(
-        '${isCredit ? '+' : '-'}₹${amt.toStringAsFixed(0)}',
+        trailingText,
         style: TextStyle(
-            fontWeight: FontWeight.w800, fontSize: 15,
-            color: isCredit ? AppColors.danger : AppColors.success),
+            fontWeight: FontWeight.w700, fontSize: 13, color: rowColor),
       ),
     );
   }

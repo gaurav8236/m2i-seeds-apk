@@ -84,6 +84,7 @@ class SupabaseService {
     required double discountAmount,
     String? customerName,
     required bool isCredit,
+    double nagadAmount = 0,
   }) async {
     final userId = _userId;
     if (userId == null) throw Exception('Not authenticated');
@@ -101,6 +102,7 @@ class SupabaseService {
         'discount_amount': discountAmount,
         'customer_name': customerName,
         'is_credit': isCredit,
+        'nagad_amount': nagadAmount,
         'items': items,
       }),
     );
@@ -153,14 +155,19 @@ class SupabaseService {
 
     final res = await _client
         .from('past_bills')
-        .select('total_amount, is_credit')
+        .select('total_amount, is_credit, nagad_amount')
         .eq('user_id', userId)
         .not('customer_name', 'is', null);
 
     double total = 0;
     for (final bill in (res as List)) {
       final amount = (bill['total_amount'] as num?)?.toDouble() ?? 0;
-      total += bill['is_credit'] == true ? amount : -amount;
+      final nagad = (bill['nagad_amount'] as num?)?.toDouble() ?? 0;
+      if (bill['is_credit'] == true) {
+        total += (amount - nagad).clamp(0, double.infinity);
+      } else {
+        total -= amount;
+      }
     }
     return total.clamp(0, double.infinity);
   }
@@ -179,7 +186,7 @@ class SupabaseService {
 
     final billRes = await _client
         .from('past_bills')
-        .select('customer_name, total_amount, is_credit, created_at')
+        .select('customer_name, total_amount, is_credit, nagad_amount, created_at')
         .eq('user_id', userId)
         .not('customer_name', 'is', null);
 
@@ -189,8 +196,10 @@ class SupabaseService {
       final name = bill['customer_name'] as String;
       agg.putIfAbsent(name, () => {'credit': 0.0, 'paid': 0.0, 'lastDate': null});
       final amt = (bill['total_amount'] as num?)?.toDouble() ?? 0;
+      final nagad = (bill['nagad_amount'] as num?)?.toDouble() ?? 0;
       if (bill['is_credit'] == true) {
-        agg[name]!['credit'] = (agg[name]!['credit'] as double) + amt;
+        // For split bills: only (total - nagad) goes to outstanding
+        agg[name]!['credit'] = (agg[name]!['credit'] as double) + (amt - nagad).clamp(0, double.infinity);
       } else {
         agg[name]!['paid'] = (agg[name]!['paid'] as double) + amt;
       }
@@ -261,15 +270,29 @@ class SupabaseService {
 
     final res = await _client
         .from('past_bills')
-        .select('*')
+        .select('total_amount, is_credit, nagad_amount, transaction_type, created_at')
         .eq('user_id', userId)
         .eq('customer_name', customerName)
         .order('created_at', ascending: false);
 
-    return (res as List).map((bill) => {
-      'type': bill['is_credit'] == true ? 'credit' : 'payment',
-      'amount': (bill['total_amount'] as num?)?.toDouble() ?? 0,
-      'created_at': bill['created_at']?.toString(),
+    return (res as List).map((bill) {
+      final isCredit = bill['is_credit'] == true;
+      final nagad = (bill['nagad_amount'] as num?)?.toDouble() ?? 0;
+      final txType = bill['transaction_type'] as String? ?? '';
+      // Determine display type: split when credit bill has a nagad portion
+      final String type = (!isCredit && txType == 'payment')
+          ? 'payment'
+          : (isCredit && nagad > 0)
+              ? 'split'
+              : isCredit
+                  ? 'credit'
+                  : 'cash';
+      return {
+        'type': type,
+        'amount': (bill['total_amount'] as num?)?.toDouble() ?? 0,
+        'nagad_amount': nagad,
+        'created_at': bill['created_at']?.toString(),
+      };
     }).toList();
   }
 

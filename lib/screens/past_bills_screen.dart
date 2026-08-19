@@ -262,19 +262,19 @@ class _BillDetailSheet extends StatelessWidget {
           pw.Center(child: pw.Text('दुकानदार सहायक', style: const pw.TextStyle(fontSize: 11))),
           pw.SizedBox(height: 10),
           pw.Divider(),
-          pw.Text('Date: ${DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt)}'),
-          if (bill.customerName != null) pw.Text('Customer: ${bill.customerName}'),
-          pw.Text(bill.isCredit ? 'Payment: Credit (उधार)' : 'Payment: Cash (नकद)'),
+          pw.Text('दिनांक: ${DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt)}'),
+          if (bill.customerName != null) pw.Text('ग्राहक: ${bill.customerName}'),
+          pw.Text(bill.isCredit ? 'भुगतान: उधार' : 'भुगतान: नकद'),
           pw.Divider(),
           pw.Table(
             border: pw.TableBorder.all(width: 0.5),
             children: [
               pw.TableRow(children: [
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('Item', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('Unit', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('Rate', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('Qty', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('Total', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('आइटम', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('इकाई', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('दर', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('मात्रा', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('कुल', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
               ]),
               ...bill.billDetails.map((item) => pw.TableRow(children: [
                 pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text(item['item_name'] ?? '')),
@@ -287,8 +287,8 @@ class _BillDetailSheet extends StatelessWidget {
           ),
           pw.SizedBox(height: 8),
           if ((bill.discountAmount ?? 0) > 0)
-            pw.Text('Discount: -₹${bill.discountAmount!.toStringAsFixed(2)}'),
-          pw.Text('Total: ₹${bill.totalAmount.toStringAsFixed(2)}',
+            pw.Text('छूट: -₹${bill.discountAmount!.toStringAsFixed(2)}'),
+          pw.Text('कुल: ₹${bill.totalAmount.toStringAsFixed(2)}',
               style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14)),
           pw.SizedBox(height: 16),
           pw.Center(child: pw.Text('धन्यवाद! फिर पधारें।')),
