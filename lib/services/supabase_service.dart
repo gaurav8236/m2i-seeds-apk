@@ -358,8 +358,8 @@ class SupabaseService {
       if (data != null) {
         final credit = data['credit'] as double;
         final paid = data['paid'] as double;
-        customer.outstanding =
-            (customer.openingBalance + credit - paid).clamp(0, double.infinity);
+        // Allow negative: customer has a credit balance (advance deposit / overpayment)
+        customer.outstanding = customer.openingBalance + credit - paid;
         customer.lastPurchaseAt = data['lastDate'] as DateTime?;
       } else {
         customer.outstanding = customer.openingBalance;
@@ -462,12 +462,13 @@ class SupabaseService {
         .select('total_amount, is_credit, nagad_amount, transaction_type, created_at')
         .eq('user_id', userId)
         .ilike('customer_name', customerName.trim())
-        .order('created_at', ascending: false);
+        .order('created_at', ascending: true); // ascending: running-balance computation needs oldest-first
 
     return (res as List).map((bill) {
       final txType = bill['transaction_type']?.toString();
       final nagad = (bill['nagad_amount'] as num?)?.toDouble() ?? 0;
-      // Back-compat: old rows without transaction_type derive from is_credit/nagad.
+      // transaction_type is authoritative (covers 'deposit' too); fall back to
+      // is_credit/nagad only for old rows written before that column existed.
       final resolvedType = (txType != null && txType.isNotEmpty)
           ? txType
           : (bill['is_credit'] == true
@@ -517,6 +518,45 @@ class SupabaseService {
 
     if (response.statusCode != 200) {
       throw Exception('Payment failed: ${response.statusCode}');
+    }
+  }
+
+  // Record an advance deposit — customer pays in ahead of any bill.
+  // Stored as transaction_type='deposit', is_credit=false.
+  // Reduces outstanding; if it exceeds balance, outstanding goes negative (credit).
+  static Future<void> recordDeposit({
+    required String customerName,
+    required double amount,
+  }) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Not authenticated');
+
+    final response = await http.post(
+      Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-checkout/'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'user_id': userId,
+        'total_bill_amount': amount,
+        'discount_amount': 0,
+        'customer_name': customerName,
+        'is_credit': false,
+        'transaction_type': 'deposit',
+        'items': [
+          {
+            'stock_id': null,
+            'new_stock': null,
+            'item_name': 'अग्रिम जमा (Advance Deposit)',
+            'quantity_billed': 1,
+            'price_per_unit': amount,
+            'item_total': amount,
+            'error': false,
+          }
+        ],
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Deposit failed: ${response.statusCode}');
     }
   }
 

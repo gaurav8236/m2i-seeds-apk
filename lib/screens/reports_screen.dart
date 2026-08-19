@@ -454,6 +454,7 @@ class _ReportsScreenState extends State<ReportsScreen>
 
   Widget _customerRow(Customer customer) {
     final hasOutstanding = customer.outstanding > 0;
+    final hasCredit      = customer.outstanding < 0; // advance deposit / overpayment
     return GestureDetector(
       onTap: () => _openCustomerDetail(customer),
       child: Container(
@@ -465,7 +466,9 @@ class _ReportsScreenState extends State<ReportsScreen>
           border: Border.all(
               color: hasOutstanding
                   ? const Color(0xFFFFCACA)
-                  : AppColors.border),
+                  : hasCredit
+                      ? const Color(0xFFBBF7D0)
+                      : AppColors.border),
         ),
         child: Row(children: [
           // Avatar
@@ -475,7 +478,9 @@ class _ReportsScreenState extends State<ReportsScreen>
               shape: BoxShape.circle,
               color: hasOutstanding
                   ? AppColors.dangerLight
-                  : AppColors.primaryLight,
+                  : hasCredit
+                      ? AppColors.successLight
+                      : AppColors.primaryLight,
             ),
             child: Center(
               child: Text(
@@ -486,7 +491,9 @@ class _ReportsScreenState extends State<ReportsScreen>
                     fontWeight: FontWeight.w700, fontSize: 16,
                     color: hasOutstanding
                         ? AppColors.danger
-                        : AppColors.primary),
+                        : hasCredit
+                            ? AppColors.success
+                            : AppColors.primary),
               ),
             ),
           ),
@@ -510,20 +517,25 @@ class _ReportsScreenState extends State<ReportsScreen>
                         fontSize: 11, color: AppColors.textMuted)),
             ]),
           ),
-          // Outstanding or clear
+          // Outstanding / credit / clear
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text(
-              hasOutstanding ? _fmt(customer.outstanding) : 'बकाया नहीं',
+              hasOutstanding
+                  ? _fmt(customer.outstanding)
+                  : hasCredit
+                      ? _fmt(customer.outstanding.abs())
+                      : 'चुकता',
               style: TextStyle(
                   fontWeight: FontWeight.w700,
                   fontSize: 14,
-                  color: hasOutstanding
-                      ? AppColors.danger
-                      : AppColors.success),
+                  color: hasOutstanding ? AppColors.danger : AppColors.success),
             ),
             if (hasOutstanding)
               const Text('बकाया',
-                  style: TextStyle(fontSize: 10, color: AppColors.danger)),
+                  style: TextStyle(fontSize: 10, color: AppColors.danger))
+            else if (hasCredit)
+              const Text('क्रेडिट',
+                  style: TextStyle(fontSize: 10, color: AppColors.success)),
           ]),
           const SizedBox(width: 4),
           const Icon(Icons.chevron_right, size: 16, color: AppColors.textMuted),
@@ -675,7 +687,8 @@ class _CustomerDetailScreen extends StatefulWidget {
 
 class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
   bool _loading = true;
-  List<Map<String, dynamic>> _ledger = [];
+  List<Map<String, dynamic>> _ledger = []; // ascending order (oldest → newest)
+  List<double> _runningBalances = [];       // running balance AFTER each entry
   List<Bill> _customerBills = [];
   final _payCtrl = TextEditingController();
   bool _paying = false;
@@ -686,12 +699,6 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
     super.initState();
     _customer = widget.customer;
     _load();
-  }
-
-  @override
-  void dispose() {
-    _payCtrl.dispose();
-    super.dispose();
   }
 
   Future<void> _load() async {
@@ -710,6 +717,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
         _customerBills = allBills
             .where((b) => b.customerName?.trim().toLowerCase() == nameLower)
             .toList();
+        _computeRunningBalances();
       });
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('लोड नहीं हो सका: $e')));
@@ -852,19 +860,62 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
     });
   }
 
-  // Outstanding = openingBalance + credits − payments.
-  // Cash sales ('sale') are settled at point-of-sale — neutral, not subtracted.
-  double get _outstanding {
-    final billsNet = _ledger.fold<double>(0, (s, e) {
-      final amt = (e['amount'] as num?)?.toDouble() ?? 0;
-      final nagad = (e['nagad_amount'] as num?)?.toDouble() ?? 0;
-      final type = e['type'] as String? ?? '';
-      if (type == 'credit') return s + amt;
-      if (type == 'split') return s + (amt - nagad).clamp(0, double.infinity);
-      if (type == 'payment') return s - amt;
-      return s; // 'sale'/'cash' — already paid, no outstanding impact
-    });
-    return (billsNet + _customer.openingBalance).clamp(0, double.infinity);
+  void _computeRunningBalances() {
+    double balance = _customer.openingBalance;
+    _runningBalances = [];
+    for (final entry in _ledger) {
+      final type  = entry['type']         as String? ?? '';
+      final amt   = (entry['amount']       as num?)?.toDouble() ?? 0;
+      final nagad = (entry['nagad_amount'] as num?)?.toDouble() ?? 0;
+      switch (type) {
+        case 'credit':
+          balance += amt;
+          break;
+        case 'split':
+          balance += (amt - nagad).clamp(0, double.infinity);
+          break;
+        case 'payment':
+        case 'deposit':
+          balance -= amt;
+          break;
+        case 'cash':
+        case 'sale':
+          break; // already settled — no outstanding impact
+      }
+      _runningBalances.add(balance);
+    }
+  }
+
+  // Single source of truth for outstanding — always the balance after the
+  // last ledger entry (or the raw opening balance when there's no history
+  // yet). Negative = customer has a credit balance (advance deposit / overpayment).
+  double get _outstanding =>
+      _runningBalances.isEmpty ? _customer.openingBalance : _runningBalances.last;
+
+  double get _totalCreditGiven => _ledger.fold<double>(0, (s, e) {
+    final type  = e['type']         as String? ?? '';
+    final amt   = (e['amount']       as num?)?.toDouble() ?? 0;
+    final nagad = (e['nagad_amount'] as num?)?.toDouble() ?? 0;
+    if (type == 'credit') return s + amt;
+    if (type == 'split')  return s + (amt - nagad).clamp(0, double.infinity);
+    return s;
+  });
+
+  double get _totalReceived => _ledger.fold<double>(0, (s, e) {
+    final type  = e['type']         as String? ?? '';
+    final amt   = (e['amount']       as num?)?.toDouble() ?? 0;
+    final nagad = (e['nagad_amount'] as num?)?.toDouble() ?? 0;
+    if (type == 'payment' || type == 'deposit' || type == 'cash' || type == 'sale') return s + amt;
+    if (type == 'split') return s + nagad;
+    return s;
+  });
+
+  // Bug #55: ₹3,090 was showing as ₹3.0k — threshold was too low.
+  // Now: below ₹1L shows full Indian-comma format (₹3,090 / ₹13,184);
+  // ₹1L+ shows compact (₹1.5L).
+  String _fmt(double n) {
+    if (n >= 100000) return '₹${(n / 100000).toStringAsFixed(1)}L';
+    return '₹${NumberFormat('#,##,##0', 'en_IN').format(n.round())}';
   }
 
   Future<void> _recordPayment() async {
@@ -888,26 +939,175 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('त्रुटि: $e')));
+            .showSnackBar(SnackBar(content: Text('दर्ज नहीं हो सका: $e')));
       }
     } finally {
       if (mounted) setState(() => _paying = false);
     }
   }
 
-  // Bug #55: ₹3,090 was showing as ₹3.0k — threshold was too low.
-  // Now: below ₹1L shows full Indian-comma format (₹3,090 / ₹13,184);
-  // ₹1L+ shows compact (₹1.5L).
-  String _fmt(double n) {
-    if (n >= 100000) return '₹${(n / 100000).toStringAsFixed(1)}L';
-    return '₹${NumberFormat('#,##,##0', 'en_IN').format(n.round())}';
+  Future<void> _showAddEntryDialog() async {
+    String entryType = 'payment';
+    final amtCtrl = TextEditingController();
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          bool submitting = false;
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Text('लेनदेन दर्ज करें',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            content: Column(mainAxisSize: MainAxisSize.min, children: [
+              _entryOption(
+                label: 'भुगतान मिला',
+                sub: 'ग्राहक ने बकाया चुकाया',
+                icon: Icons.arrow_downward,
+                value: 'payment',
+                selected: entryType,
+                color: AppColors.success,
+                bgColor: AppColors.successLight,
+                onTap: () => setLocal(() => entryType = 'payment'),
+              ),
+              const SizedBox(height: 8),
+              _entryOption(
+                label: 'अग्रिम जमा',
+                sub: 'ग्राहक ने पहले से पैसा दिया',
+                icon: Icons.savings_outlined,
+                value: 'deposit',
+                selected: entryType,
+                color: const Color(0xFF7C3AED),
+                bgColor: const Color(0xFFEDE9FE),
+                onTap: () => setLocal(() => entryType = 'deposit'),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: amtCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  prefixText: '₹  ',
+                  labelText: 'राशि',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ]),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('रद्द करें',
+                    style: TextStyle(color: AppColors.textMuted)),
+              ),
+              StatefulBuilder(
+                builder: (ctx2, setSub) => ElevatedButton(
+                  onPressed: submitting
+                      ? null
+                      : () async {
+                          final amt = double.tryParse(amtCtrl.text);
+                          if (amt == null || amt <= 0) return;
+                          setSub(() => submitting = true);
+                          try {
+                            if (entryType == 'payment') {
+                              await SupabaseService.recordPayment(
+                                  customerName: widget.customer.name,
+                                  amount: amt);
+                            } else {
+                              await SupabaseService.recordDeposit(
+                                  customerName: widget.customer.name,
+                                  amount: amt);
+                            }
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            await _load();
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                  content: Text(
+                                      '₹${amt.toStringAsFixed(0)} दर्ज किया')));
+                            }
+                          } catch (e) {
+                            setSub(() => submitting = false);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('त्रुटि: $e')));
+                            }
+                          }
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: submitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2.5))
+                      : const Text('दर्ज करें',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    amtCtrl.dispose();
+  }
+
+  Widget _entryOption({
+    required String label,
+    required String sub,
+    required IconData icon,
+    required String value,
+    required String selected,
+    required Color color,
+    required Color bgColor,
+    required VoidCallback onTap,
+  }) {
+    final active = selected == value;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: active ? bgColor : AppColors.bg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: active ? color : AppColors.border,
+              width: active ? 1.5 : 1),
+        ),
+        child: Row(children: [
+          Icon(icon, size: 18, color: active ? color : AppColors.textMuted),
+          const SizedBox(width: 10),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label,
+                style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: active ? color : AppColors.textPrimary)),
+            Text(sub,
+                style: const TextStyle(
+                    fontSize: 11, color: AppColors.textMuted)),
+          ]),
+        ]),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final outstanding = _outstanding;
+    final isCredit    = outstanding < 0;
+    final isClear     = outstanding == 0;
+    final balLabel = isCredit ? 'क्रेडिट बैलेंस' : (isClear ? 'चुकता' : 'कुल बकाया');
+
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: Column(children: [
+        // ── Header ──────────────────────────────────────────────────────────
         Container(
           decoration: BoxDecoration(
             gradient: primaryGradient,
@@ -921,6 +1121,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
               child: Column(children: [
+                // Back row + "दर्ज करें" button
                 Row(children: [
                   IconButton(
                     onPressed: () => Navigator.pop(context),
@@ -938,7 +1139,8 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                           style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w700,
-                              fontSize: 16)),
+                              fontSize: 16),
+                          overflow: TextOverflow.ellipsis),
                       Row(children: [
                         if (_customer.phone != null && _customer.phone!.isNotEmpty) ...[
                           const Icon(Icons.phone, color: Colors.white70, size: 11),
@@ -958,6 +1160,29 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                       ]),
                     ]),
                   ),
+                  GestureDetector(
+                    onTap: _showAddEntryDialog,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.3)),
+                      ),
+                      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.add, size: 14, color: Colors.white),
+                        SizedBox(width: 4),
+                        Text('दर्ज करें',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600)),
+                      ]),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
                   IconButton(
                     onPressed: _showEditSheet,
                     icon: const Icon(Icons.edit_outlined, color: Colors.white, size: 18),
@@ -970,135 +1195,124 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                   ),
                 ]),
                 const SizedBox(height: 16),
+
+                // 3-tile summary card
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 14),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                         color: Colors.white.withValues(alpha: 0.2)),
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('कुल बकाया',
-                          style: TextStyle(
-                              color: Colors.white70, fontSize: 12,
-                              fontWeight: FontWeight.w600)),
-                      Text(
-                        _loading ? '—' : _fmt(_outstanding),
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 26,
-                            fontWeight: FontWeight.w800, letterSpacing: -1),
+                  child: Row(children: [
+                    Expanded(
+                      child: _hStat('उधार दिया',
+                          _loading ? '—' : _fmt(_totalCreditGiven)),
+                    ),
+                    Container(
+                        height: 30,
+                        width: 1,
+                        color: Colors.white.withOpacity(0.2)),
+                    Expanded(
+                      child: _hStat('नकद मिला',
+                          _loading ? '—' : _fmt(_totalReceived)),
+                    ),
+                    Container(
+                        height: 30,
+                        width: 1,
+                        color: Colors.white.withOpacity(0.2)),
+                    Expanded(
+                      child: _hStat(
+                        balLabel,
+                        _loading
+                            ? '—'
+                            : (isCredit
+                                ? _fmt(outstanding.abs())
+                                : _fmt(outstanding)),
+                        highlight: true,
+                        isGreen: isCredit || isClear,
                       ),
-                    ],
-                  ),
+                    ),
+                  ]),
                 ),
               ]),
             ),
           ),
         ),
 
+        // ── Body ────────────────────────────────────────────────────────────
         if (_loading)
-          const Expanded(child: Center(child: CircularProgressIndicator()))
+          const Expanded(
+              child: Center(child: CircularProgressIndicator()))
         else
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(14),
-              child: Column(children: [
-                // Payment section
-                if (_outstanding > 0)
+            child: RefreshIndicator(
+              onRefresh: _load,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(14),
+                child: Column(children: [
+                  // Ledger card
                   Container(
-                    padding: const EdgeInsets.all(14),
-                    margin: const EdgeInsets.only(bottom: 14),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: const Color(0xFFFDE68A),
-                          width: 1.5),
+                      border: Border.all(color: AppColors.border),
                     ),
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                      const Text('भुगतान दर्ज करें',
-                          style: TextStyle(
-                              fontSize: 11, fontWeight: FontWeight.w700,
-                              color: AppColors.textMuted,
-                              letterSpacing: 0.4)),
-                      const SizedBox(height: 8),
-                      Row(children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _payCtrl,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                                prefixText: '₹',
-                                hintText: 'राशि',
-                                isDense: true),
+                    child: Column(children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+                        child: Row(children: [
+                          const Expanded(
+                            child: Text('लेनदेन इतिहास',
+                                style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.textMuted,
+                                    letterSpacing: 0.5)),
                           ),
-                        ),
-                        const SizedBox(width: 10),
-                        ElevatedButton(
-                          onPressed: _paying ? null : _recordPayment,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.success,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10)),
+                          Text('${_ledger.length} लेनदेन',
+                              style: const TextStyle(
+                                  fontSize: 10,
+                                  color: AppColors.textMuted)),
+                        ]),
+                      ),
+                      if (_ledger.isEmpty &&
+                          widget.customer.openingBalance <= 0)
+                        const Padding(
+                          padding: EdgeInsets.all(20),
+                          child: Center(
+                            child: Text('कोई लेनदेन नहीं',
+                                style: TextStyle(
+                                    color: AppColors.textMuted,
+                                    fontSize: 13)),
                           ),
-                          child: _paying
-                              ? const SizedBox(
-                                  width: 18, height: 18,
-                                  child: CircularProgressIndicator(
-                                      color: Colors.white, strokeWidth: 2.5))
-                              : const Text('दर्ज',
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.w700)),
+                        )
+                      else
+                        ListView.separated(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          // Newest-first display + optional opening balance row at bottom
+                          itemCount: _ledger.length +
+                              (widget.customer.openingBalance > 0 ? 1 : 0),
+                          separatorBuilder: (_, __) => const Divider(
+                              height: 1, color: AppColors.border),
+                          itemBuilder: (_, i) {
+                            // Last row = opening balance
+                            if (widget.customer.openingBalance > 0 &&
+                                i == _ledger.length) {
+                              return _openingBalanceRow();
+                            }
+                            // Reverse ledger index for newest-first display
+                            final idx = _ledger.length - 1 - i;
+                            return _ledgerRow(
+                                _ledger[idx], _runningBalances[idx]);
+                          },
                         ),
-                      ]),
                     ]),
                   ),
-
-                // Transaction history
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Column(children: [
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(14, 12, 14, 8),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text('लेनदेन इतिहास',
-                            style: TextStyle(
-                                fontSize: 10, fontWeight: FontWeight.w700,
-                                color: AppColors.textMuted,
-                                letterSpacing: 0.5)),
-                      ),
-                    ),
-                    if (_ledger.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.all(20),
-                        child: Center(
-                          child: Text('कोई लेनदेन नहीं',
-                              style: TextStyle(
-                                  color: AppColors.textMuted, fontSize: 13)),
-                        ),
-                      )
-                    else
-                      ListView.separated(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: _ledger.length,
-                        separatorBuilder: (_, __) =>
-                            const Divider(height: 1, color: AppColors.border),
-                        itemBuilder: (_, i) => _ledgerRow(_ledger[i]),
-                      ),
-                  ]),
-                ),
 
                 // Bills of this customer
                 if (_customerBills.isNotEmpty) ...[
@@ -1116,83 +1330,183 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                   ),
                   ..._customerBills.map((b) => BillCard(bill: b)),
                 ],
+                const SizedBox(height: 24),
               ]),
             ),
           ),
+        ),
       ]),
     );
   }
 
-  Widget _ledgerRow(Map<String, dynamic> entry) {
-    final type = entry['type'] as String? ?? 'sale';
-    final amt = (entry['amount'] as num?)?.toDouble() ?? 0;
-    final nagad = (entry['nagad_amount'] as num?)?.toDouble() ?? 0;
-    // .toLocal() converts UTC timestamp from Supabase to IST for display (#7).
-    final date = entry['created_at'] != null
-        ? DateTime.tryParse(entry['created_at'] as String)?.toLocal()
-        : null;
+  // NOTE (merge/unified-v1): the old single-arg _ledgerRow(entry) that lived
+  // here was superseded by the two-arg _ledgerRow(entry, runningBalance)
+  // below — its type-based color/icon/label switch was carried over there
+  // so nothing from Sprint 9's visual treatment was lost.
+  Widget _hStat(String label, String value,
+      {bool highlight = false, bool isGreen = false}) {
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      Text(value,
+          style: TextStyle(
+              color: highlight
+                  ? (isGreen ? const Color(0xFF4ADE80) : Colors.white)
+                  : Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: highlight ? 16 : 14,
+              letterSpacing: -0.5)),
+      const SizedBox(height: 3),
+      Text(label,
+          style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.7),
+              fontSize: 9,
+              fontWeight: FontWeight.w500),
+          textAlign: TextAlign.center),
+    ]);
+  }
 
-    // Visual treatment per transaction type:
-    //   credit  → red   / arrow-up     / उधार            / +₹
-    //   split   → orange/ call-split   / आंशिक नकद+उधार   / नकद · उधार breakdown
-    //   payment → green / arrow-down   / भुगतान           / −₹
-    //   sale    → green / shopping bag / नकद बिक्री        / ₹ (neutral)
-    Color rowColor;
-    IconData rowIcon;
-    String rowLabel;
-    String trailingText;
-
-    switch (type) {
-      case 'split':
-        rowColor = Colors.orange.shade700;
-        rowIcon = Icons.call_split;
-        rowLabel = 'आंशिक नकद+उधार';
-        final udhar = (amt - nagad).clamp(0, double.infinity);
-        trailingText = '₹${nagad.toStringAsFixed(0)} नकद · ₹${udhar.toStringAsFixed(0)} उधार';
-        break;
-      case 'payment':
-        rowColor = AppColors.success;
-        rowIcon = Icons.arrow_downward;
-        rowLabel = 'भुगतान';
-        trailingText = '-₹${amt.toStringAsFixed(0)}';
-        break;
-      case 'cash':
-      case 'sale':
-        rowColor = AppColors.success;
-        rowIcon = Icons.payments_outlined;
-        rowLabel = 'नकद बिक्री';
-        trailingText = '₹${amt.toStringAsFixed(0)}';
-        break;
-      default: // 'credit'
-        rowColor = AppColors.danger;
-        rowIcon = Icons.arrow_upward;
-        rowLabel = 'उधार';
-        trailingText = '+₹${amt.toStringAsFixed(0)}';
-    }
-
+  Widget _openingBalanceRow() {
+    final ob = widget.customer.openingBalance;
     return ListTile(
       contentPadding:
           const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
       leading: Container(
-        width: 36, height: 36,
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: AppColors.primaryLight,
+        ),
+        child: const Icon(Icons.account_balance_wallet_outlined,
+            size: 18, color: AppColors.primary),
+      ),
+      title: const Text('शुरुआती बकाया',
+          style: TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+              color: AppColors.primary)),
+      subtitle: const Text('Opening Balance',
+          style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text('+₹${ob.toStringAsFixed(0)}',
+              style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                  color: AppColors.primary)),
+          const Text('बकाया',
+              style: TextStyle(fontSize: 9, color: AppColors.textMuted)),
+        ],
+      ),
+    );
+  }
+
+  Widget _ledgerRow(Map<String, dynamic> entry, double runningBalance) {
+    final type  = entry['type']         as String? ?? '';
+    final amt   = (entry['amount']       as num?)?.toDouble() ?? 0;
+    final nagad = (entry['nagad_amount'] as num?)?.toDouble() ?? 0;
+    final date  = entry['created_at'] != null
+        ? DateTime.tryParse(entry['created_at'] as String)
+        : null;
+
+    Color    rowColor;
+    IconData rowIcon;
+    String   rowLabel;
+    String   amtText;
+
+    switch (type) {
+      case 'split':
+        rowColor = Colors.orange.shade700;
+        rowIcon  = Icons.call_split;
+        rowLabel = 'आंशिक नकद+उधार';
+        final udhar = (amt - nagad).clamp(0, double.infinity);
+        amtText = '₹${nagad.toStringAsFixed(0)} नकद · ₹${udhar.toStringAsFixed(0)} उधार';
+        break;
+      case 'payment':
+        rowColor = AppColors.success;
+        rowIcon  = Icons.arrow_downward;
+        rowLabel = 'भुगतान मिला';
+        amtText  = '-₹${amt.toStringAsFixed(0)}';
+        break;
+      case 'deposit':
+        rowColor = const Color(0xFF7C3AED);
+        rowIcon  = Icons.savings_outlined;
+        rowLabel = 'अग्रिम जमा';
+        amtText  = '-₹${amt.toStringAsFixed(0)}';
+        break;
+      case 'cash':
+      case 'sale':
+        rowColor = AppColors.success;
+        rowIcon  = Icons.payments_outlined;
+        rowLabel = 'नकद बिक्री';
+        amtText  = '₹${amt.toStringAsFixed(0)}';
+        break;
+      default: // 'credit'
+        rowColor = AppColors.danger;
+        rowIcon  = Icons.arrow_upward;
+        rowLabel = 'उधार';
+        amtText  = '+₹${amt.toStringAsFixed(0)}';
+    }
+
+    // Running balance annotation per row
+    final balIsCredit = runningBalance < 0;
+    final balColor    = balIsCredit
+        ? AppColors.success
+        : (runningBalance > 0 ? AppColors.danger : AppColors.success);
+    final balText     = balIsCredit
+        ? 'क्रेडिट ${_fmt(runningBalance.abs())}'
+        : (runningBalance > 0
+            ? 'बकाया ${_fmt(runningBalance)}'
+            : 'चुकता ✓');
+
+    return ListTile(
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      leading: Container(
+        width: 36,
+        height: 36,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: rowColor.withOpacity(0.12),
         ),
         child: Icon(rowIcon, size: 18, color: rowColor),
       ),
-      title: Text(rowLabel,
-          style: TextStyle(
-              fontWeight: FontWeight.w600, fontSize: 13, color: rowColor)),
-      subtitle: date != null
-          ? Text(DateFormat('dd MMM, hh:mm a').format(date.toLocal()),
-              style: const TextStyle(
-                  fontSize: 11, color: AppColors.textMuted))
-          : null,
-      trailing: Text(
-        trailingText,
-        style: TextStyle(
-            fontWeight: FontWeight.w700, fontSize: 13, color: rowColor),
+      title: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Text(rowLabel,
+                style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: rowColor),
+                overflow: TextOverflow.ellipsis),
+          ),
+          const SizedBox(width: 8),
+          Text(amtText,
+              style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                  color: rowColor)),
+        ],
+      ),
+      subtitle: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            date != null
+                ? DateFormat('dd MMM, hh:mm a').format(date.toLocal())
+                : '—',
+            style: const TextStyle(
+                fontSize: 11, color: AppColors.textMuted),
+          ),
+          Text(balText,
+              style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: balColor)),
+        ],
       ),
     );
   }
