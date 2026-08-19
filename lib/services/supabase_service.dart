@@ -165,6 +165,7 @@ class SupabaseService {
     required double discountAmount,
     String? customerName,
     required bool isCredit,
+    double nagadAmount = 0,
   }) async {
     final userId = _userId;
     if (userId == null) throw Exception('Not authenticated');
@@ -182,6 +183,7 @@ class SupabaseService {
         'discount_amount': discountAmount,
         'customer_name': customerName,
         'is_credit': isCredit,
+        'nagad_amount': nagadAmount,
         'items': items,
       }),
     );
@@ -249,7 +251,7 @@ class SupabaseService {
     // Bills — primary source, must succeed.
     final billRes = await _client
         .from('past_bills')
-        .select('customer_name, total_amount, is_credit, transaction_type')
+        .select('customer_name, total_amount, is_credit, transaction_type, nagad_amount')
         .eq('user_id', userId)
         .not('customer_name', 'is', null);
     for (final bill in (billRes as List)) {
@@ -262,8 +264,11 @@ class SupabaseService {
       final resolvedType = (txType != null && txType.isNotEmpty)
           ? txType
           : (bill['is_credit'] == true ? 'credit' : 'sale');
+      final nagad = (bill['nagad_amount'] as num?)?.toDouble() ?? 0;
       if (resolvedType == 'credit') {
         perCust[key] = perCust[key]! + amount;
+      } else if (resolvedType == 'split') {
+        perCust[key] = perCust[key]! + (amount - nagad).clamp(0, double.infinity);
       } else if (resolvedType == 'payment') {
         perCust[key] = perCust[key]! - amount;
       }
@@ -309,7 +314,7 @@ class SupabaseService {
 
     final billRes = await _client
         .from('past_bills')
-        .select('customer_name, total_amount, is_credit, transaction_type, created_at')
+        .select('customer_name, total_amount, is_credit, transaction_type, nagad_amount, created_at')
         .eq('user_id', userId)
         .not('customer_name', 'is', null);
 
@@ -330,8 +335,12 @@ class SupabaseService {
       final resolvedType = (txType != null && txType.isNotEmpty)
           ? txType
           : (bill['is_credit'] == true ? 'credit' : 'sale');
+      final nagad = (bill['nagad_amount'] as num?)?.toDouble() ?? 0;
       if (resolvedType == 'credit') {
         agg[key]!['credit'] = (agg[key]!['credit'] as double) + amt;
+      } else if (resolvedType == 'split') {
+        // Split bill: only (total - nagad) is still owed.
+        agg[key]!['credit'] = (agg[key]!['credit'] as double) + (amt - nagad).clamp(0, double.infinity);
       } else if (resolvedType == 'payment') {
         agg[key]!['paid'] = (agg[key]!['paid'] as double) + amt;
       }
@@ -450,20 +459,24 @@ class SupabaseService {
     // ilike = case-insensitive match — fixes "Mayank"/"mayank" split (#58).
     final res = await _client
         .from('past_bills')
-        .select('total_amount, is_credit, transaction_type, created_at')
+        .select('total_amount, is_credit, nagad_amount, transaction_type, created_at')
         .eq('user_id', userId)
         .ilike('customer_name', customerName.trim())
         .order('created_at', ascending: false);
 
     return (res as List).map((bill) {
       final txType = bill['transaction_type']?.toString();
-      // Back-compat: old rows without transaction_type use is_credit.
+      final nagad = (bill['nagad_amount'] as num?)?.toDouble() ?? 0;
+      // Back-compat: old rows without transaction_type derive from is_credit/nagad.
       final resolvedType = (txType != null && txType.isNotEmpty)
           ? txType
-          : (bill['is_credit'] == true ? 'credit' : 'sale');
+          : (bill['is_credit'] == true
+              ? (nagad > 0 ? 'split' : 'credit')
+              : 'sale');
       return {
         'type': resolvedType,
         'amount': (bill['total_amount'] as num?)?.toDouble() ?? 0,
+        'nagad_amount': nagad,
         // Keep raw string; .toLocal() applied at display site via DateTime.parse.
         'created_at': bill['created_at']?.toString(),
       };

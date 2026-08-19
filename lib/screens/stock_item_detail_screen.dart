@@ -40,6 +40,7 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
   late final _aliasCtrl = TextEditingController();
   late double _lowStockLimit = widget.item.lowStockLimit;
   late List<String> _aliases = List.from(widget.item.aliases);
+  bool _isDirty = false;
 
   @override
   void initState() {
@@ -154,6 +155,7 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
       );
 
       if (mounted) {
+        setState(() => _isDirty = false);
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('सहेज दिया गया')));
         Navigator.pop(context);
@@ -166,6 +168,29 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Future<void> _handleBack() async {
+    if (!_isDirty) { Navigator.pop(context); return; }
+    final leave = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('बदलाव छोड़ें?'),
+        content: const Text('सहेजे बिना जाने पर बदलाव खो जाएंगे।'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('रहने दें'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('छोड़ें',
+                style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if ((leave ?? false) && mounted) Navigator.pop(context);
   }
 
   void _addAlias() {
@@ -187,7 +212,13 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) async {
+        if (didPop) return;
+        await _handleBack();
+      },
+      child: Scaffold(
       backgroundColor: AppColors.bg,
       body: Column(children: [
         // Header
@@ -205,7 +236,7 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
               child: Row(children: [
                 IconButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: _handleBack,
                   icon: const Icon(Icons.arrow_back, color: Colors.white),
                   style: IconButton.styleFrom(
                     backgroundColor: Colors.white.withValues(alpha: 0.2),
@@ -243,6 +274,7 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
                 _lbl('सामान का नाम'),
                 const SizedBox(height: 6),
                 TextField(controller: _nameCtrl,
+                    onChanged: (_) => setState(() => _isDirty = true),
                     decoration: const InputDecoration(isDense: true)),
                 const SizedBox(height: 14),
                 // Category + Unit — bilingual dropdowns (#23 Sprint 8)
@@ -258,11 +290,13 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
                         _selCategory = v;
                         if (v != null && v != 'अन्य') _categoryCtrl.text = v;
                         else if (v == 'अन्य') _categoryCtrl.text = '';
+                        _isDirty = true;
                       }),
                     ),
                     if (_selCategory == 'अन्य') ...[
                       const SizedBox(height: 6),
                       TextField(controller: _categoryCtrl,
+                          onChanged: (_) => setState(() => _isDirty = true),
                           decoration: const InputDecoration(
                               hintText: 'श्रेणी लिखें...', isDense: true)),
                     ],
@@ -279,11 +313,13 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
                         _selUnit = v;
                         if (v != null && v != 'अन्य') _unitCtrl.text = v;
                         else if (v == 'अन्य') _unitCtrl.text = '';
+                        _isDirty = true;
                       }),
                     ),
                     if (_selUnit == 'अन्य') ...[
                       const SizedBox(height: 6),
                       TextField(controller: _unitCtrl,
+                          onChanged: (_) => setState(() => _isDirty = true),
                           decoration: const InputDecoration(
                               hintText: 'इकाई लिखें...', isDense: true)),
                     ],
@@ -297,6 +333,7 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
                     TextField(
                       controller: _priceCtrl,
                       keyboardType: TextInputType.number,
+                      onChanged: (_) => setState(() => _isDirty = true),
                       decoration: const InputDecoration(
                           prefixText: '₹ ', isDense: true),
                     ),
@@ -308,6 +345,7 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
                     TextField(
                       controller: _stockCtrl,
                       keyboardType: TextInputType.number,
+                      onChanged: (_) => setState(() => _isDirty = true),
                       decoration: const InputDecoration(isDense: true),
                     ),
                   ])),
@@ -398,7 +436,7 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
                     value: _lowStockLimit,
                     min: 0, max: 100,
                     onChanged: (v) =>
-                        setState(() => _lowStockLimit = v.roundToDouble()),
+                        setState(() { _lowStockLimit = v.roundToDouble(); _isDirty = true; }),
                   ),
                 ),
               ]),
@@ -470,7 +508,8 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
           ), // SafeArea
         ),
       ]),
-    );
+    ), // Scaffold
+    ); // PopScope
   }
 
   Widget _insightCell({

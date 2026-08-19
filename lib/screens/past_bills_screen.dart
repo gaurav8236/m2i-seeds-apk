@@ -132,5 +132,4 @@ class _PastBillsScreenState extends State<PastBillsScreen> {
       ),
     );
   }
-
 }

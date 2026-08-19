@@ -857,9 +857,12 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
   double get _outstanding {
     final billsNet = _ledger.fold<double>(0, (s, e) {
       final amt = (e['amount'] as num?)?.toDouble() ?? 0;
-      if (e['type'] == 'credit') return s + amt;
-      if (e['type'] == 'payment') return s - amt;
-      return s; // 'sale' — already paid, no outstanding impact
+      final nagad = (e['nagad_amount'] as num?)?.toDouble() ?? 0;
+      final type = e['type'] as String? ?? '';
+      if (type == 'credit') return s + amt;
+      if (type == 'split') return s + (amt - nagad).clamp(0, double.infinity);
+      if (type == 'payment') return s - amt;
+      return s; // 'sale'/'cash' — already paid, no outstanding impact
     });
     return (billsNet + _customer.openingBalance).clamp(0, double.infinity);
   }
@@ -1123,42 +1126,48 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
   Widget _ledgerRow(Map<String, dynamic> entry) {
     final type = entry['type'] as String? ?? 'sale';
     final amt = (entry['amount'] as num?)?.toDouble() ?? 0;
+    final nagad = (entry['nagad_amount'] as num?)?.toDouble() ?? 0;
     // .toLocal() converts UTC timestamp from Supabase to IST for display (#7).
     final date = entry['created_at'] != null
         ? DateTime.tryParse(entry['created_at'] as String)?.toLocal()
         : null;
 
     // Visual treatment per transaction type:
-    //   credit  → red  / arrow-up    / उधार   / +₹
-    //   payment → green/ arrow-down  / भुगतान / −₹
-    //   sale    → blue / shopping bag/ नकद बिक्री / ₹ (neutral)
-    final Color iconBg;
-    final Color iconColor;
-    final IconData icon;
-    final String label;
-    final String amtPrefix;
+    //   credit  → red   / arrow-up     / उधार            / +₹
+    //   split   → orange/ call-split   / आंशिक नकद+उधार   / नकद · उधार breakdown
+    //   payment → green / arrow-down   / भुगतान           / −₹
+    //   sale    → green / shopping bag / नकद बिक्री        / ₹ (neutral)
+    Color rowColor;
+    IconData rowIcon;
+    String rowLabel;
+    String trailingText;
 
     switch (type) {
-      case 'credit':
-        iconBg = AppColors.dangerLight;
-        iconColor = AppColors.danger;
-        icon = Icons.arrow_upward;
-        label = 'उधार';
-        amtPrefix = '+';
+      case 'split':
+        rowColor = Colors.orange.shade700;
+        rowIcon = Icons.call_split;
+        rowLabel = 'आंशिक नकद+उधार';
+        final udhar = (amt - nagad).clamp(0, double.infinity);
+        trailingText = '₹${nagad.toStringAsFixed(0)} नकद · ₹${udhar.toStringAsFixed(0)} उधार';
         break;
       case 'payment':
-        iconBg = AppColors.successLight;
-        iconColor = AppColors.success;
-        icon = Icons.arrow_downward;
-        label = 'भुगतान';
-        amtPrefix = '−';
+        rowColor = AppColors.success;
+        rowIcon = Icons.arrow_downward;
+        rowLabel = 'भुगतान';
+        trailingText = '-₹${amt.toStringAsFixed(0)}';
         break;
-      default: // 'sale'
-        iconBg = AppColors.primaryLight;
-        iconColor = AppColors.primary;
-        icon = Icons.shopping_bag_outlined;
-        label = 'नकद बिक्री';
-        amtPrefix = '';
+      case 'cash':
+      case 'sale':
+        rowColor = AppColors.success;
+        rowIcon = Icons.payments_outlined;
+        rowLabel = 'नकद बिक्री';
+        trailingText = '₹${amt.toStringAsFixed(0)}';
+        break;
+      default: // 'credit'
+        rowColor = AppColors.danger;
+        rowIcon = Icons.arrow_upward;
+        rowLabel = 'उधार';
+        trailingText = '+₹${amt.toStringAsFixed(0)}';
     }
 
     return ListTile(
@@ -1166,21 +1175,24 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
           const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
       leading: Container(
         width: 36, height: 36,
-        decoration: BoxDecoration(shape: BoxShape.circle, color: iconBg),
-        child: Icon(icon, size: 18, color: iconColor),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: rowColor.withOpacity(0.12),
+        ),
+        child: Icon(rowIcon, size: 18, color: rowColor),
       ),
-      title: Text(label,
+      title: Text(rowLabel,
           style: TextStyle(
-              fontWeight: FontWeight.w600, fontSize: 13, color: iconColor)),
+              fontWeight: FontWeight.w600, fontSize: 13, color: rowColor)),
       subtitle: date != null
-          ? Text(DateFormat('dd MMM, hh:mm a').format(date),
+          ? Text(DateFormat('dd MMM, hh:mm a').format(date.toLocal()),
               style: const TextStyle(
                   fontSize: 11, color: AppColors.textMuted))
           : null,
       trailing: Text(
-        '$amtPrefix₹${amt.toStringAsFixed(0)}',
+        trailingText,
         style: TextStyle(
-            fontWeight: FontWeight.w800, fontSize: 15, color: iconColor),
+            fontWeight: FontWeight.w700, fontSize: 13, color: rowColor),
       ),
     );
   }
