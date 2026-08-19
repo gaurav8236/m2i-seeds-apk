@@ -76,7 +76,18 @@ class _AuthGateState extends State<AuthGate> {
       stream: AuthService.authStateChanges,
       builder: (context, snapshot) {
         final session = AuthService.currentSession;
-        if (session == null) return const LoginScreen();
+        if (session == null) {
+          // Pop any pushed routes (customer detail, stock detail, etc.) so the
+          // back button on LoginScreen doesn't return to an auth-required screen
+          // (#13). Done in a post-frame callback to avoid modifying the navigator
+          // during build.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (context.mounted) {
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            }
+          });
+          return const LoginScreen();
+        }
 
         AuthService.ensureUserRow();
 

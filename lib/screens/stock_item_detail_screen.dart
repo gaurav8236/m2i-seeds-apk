@@ -93,17 +93,20 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
         );
       }
 
-      await SupabaseService.upsertInventoryItems([{
-        'item_name': name,
-        'category': _categoryCtrl.text.trim(),
-        'unit': _unitCtrl.text.trim(),
-        'selling_price': price,
-        'current_stock': newStock,
-        'low_stock_limit': _lowStockLimit,
-        'aliases': _aliases,
-        'cost_price': 0.0,
-        'image_url': null,
-      }]);
+      // Use ID-based direct update instead of the name-keyed upsert RPC.
+      // The RPC creates a new item when the name changes (#22); this path
+      // updates the existing row correctly, and also avoids the RPC error
+      // seen after logRestock (#20).
+      await SupabaseService.updateInventoryItem(
+        stockId: widget.item.id,
+        itemName: name,
+        category: _categoryCtrl.text.trim(),
+        unit: _unitCtrl.text.trim(),
+        sellingPrice: price,
+        currentStock: newStock,
+        lowStockLimit: _lowStockLimit,
+        aliases: _aliases,
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

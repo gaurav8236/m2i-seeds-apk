@@ -43,6 +43,57 @@ class SupabaseService {
     });
   }
 
+  // Direct update for an EXISTING item by its user_stock.id.
+  // Unlike upsertInventoryItems (which uses item_name as the upsert key and
+  // creates a new item when the name changes — bug #22), this path updates
+  // both user_stock and master_inventory directly via ID, so renaming works
+  // correctly (#22) and stock-only edits no longer fail (#20).
+  static Future<void> updateInventoryItem({
+    required String stockId,
+    required String itemName,
+    required String category,
+    required String unit,
+    required double sellingPrice,
+    required double currentStock,
+    required double lowStockLimit,
+    required List<String> aliases,
+  }) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Not authenticated');
+
+    // 1. Update the user-specific stock columns.
+    await _client
+        .from('user_stock')
+        .update({
+          'selling_price': sellingPrice,
+          'current_stock': currentStock,
+          'low_stock_limit': lowStockLimit,
+          'aliases': aliases,
+        })
+        .eq('id', stockId)
+        .eq('user_id', userId);
+
+    // 2. Fetch the product_id FK to master_inventory.
+    final row = await _client
+        .from('user_stock')
+        .select('product_id')
+        .eq('id', stockId)
+        .eq('user_id', userId)
+        .single();
+
+    final productId = row['product_id']?.toString();
+    if (productId != null && productId.isNotEmpty) {
+      await _client
+          .from('master_inventory')
+          .update({
+            'item_name': itemName.trim(),
+            'category': category.trim(),
+            'unit': unit.trim(),
+          })
+          .eq('id', productId);
+    }
+  }
+
   // ── Bills ──────────────────────────────────────────────────────────────────
 
   static Future<List<Bill>> fetchPastBills() async {
@@ -318,34 +369,61 @@ class SupabaseService {
     });
   }
 
-  // Called before checkout to ensure customer exists in the customers table
+  // Called before checkout to ensure customer exists in the customers table.
+  // Uses case-insensitive lookup first to avoid creating "Mayank"/"mayank"
+  // duplicates (#58).
   static Future<void> ensureCustomerExists(String customerName) async {
     final userId = _userId;
     if (userId == null) return;
-    await _client.from('customers').upsert(
-      {'user_id': userId, 'name': customerName.trim()},
-      onConflict: 'user_id,name',
-      ignoreDuplicates: true,
-    );
+    final normalized = customerName.trim();
+    try {
+      final existing = await _client
+          .from('customers')
+          .select('id')
+          .eq('user_id', userId)
+          .ilike('name', normalized)
+          .maybeSingle();
+      if (existing == null) {
+        await _client.from('customers').insert({
+          'user_id': userId,
+          'name': normalized,
+        });
+      }
+      // If a case-variant already exists, don't create a duplicate.
+    } catch (_) {
+      // Non-fatal — checkout can proceed even if customer row is missing.
+    }
   }
 
   static Future<void> updateCustomer({
     required String id,
+    required String oldName,   // needed to cascade rename to past_bills (#52)
     required String name,
     String? phone,
     required double openingBalance,
   }) async {
     final userId = _userId;
     if (userId == null) throw Exception('Not authenticated');
+    final newName = name.trim();
     await _client
         .from('customers')
         .update({
-          'name': name.trim(),
+          'name': newName,
           'phone': phone != null && phone.trim().isNotEmpty ? phone.trim() : null,
           'opening_balance': openingBalance,
         })
         .eq('id', id)
         .eq('user_id', userId);
+
+    // Cascade rename to past_bills so ledger history stays intact after a
+    // customer name change (#52).
+    if (newName != oldName.trim()) {
+      await _client
+          .from('past_bills')
+          .update({'customer_name': newName})
+          .eq('user_id', userId)
+          .eq('customer_name', oldName.trim());
+    }
   }
 
   // ── Customer Ledger ────────────────────────────────────────────────────────
@@ -354,11 +432,12 @@ class SupabaseService {
     final userId = _userId;
     if (userId == null) return [];
 
+    // ilike = case-insensitive match — fixes "Mayank"/"mayank" split (#58).
     final res = await _client
         .from('past_bills')
         .select('total_amount, is_credit, transaction_type, created_at')
         .eq('user_id', userId)
-        .eq('customer_name', customerName)
+        .ilike('customer_name', customerName.trim())
         .order('created_at', ascending: false);
 
     return (res as List).map((bill) {
@@ -370,6 +449,7 @@ class SupabaseService {
       return {
         'type': resolvedType,
         'amount': (bill['total_amount'] as num?)?.toDouble() ?? 0,
+        // Keep raw string; .toLocal() applied at display site via DateTime.parse.
         'created_at': bill['created_at']?.toString(),
       };
     }).toList();

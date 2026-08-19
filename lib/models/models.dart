@@ -117,7 +117,8 @@ class Bill {
     final txType = map['transaction_type']?.toString();
     return Bill(
       id: map['id']?.toString() ?? '',
-      createdAt: DateTime.tryParse(map['created_at'] ?? '') ?? DateTime.now(),
+      // .toLocal() so all display sites show IST not UTC (#7).
+      createdAt: DateTime.tryParse(map['created_at'] ?? '')?.toLocal() ?? DateTime.now(),
       customerName: map['customer_name']?.toString(),
       totalAmount: (map['total_amount'] as num?)?.toDouble() ?? 0,
       discountAmount: (map['discount_amount'] as num?)?.toDouble(),
@@ -188,7 +189,8 @@ class Customer {
       name: map['name']?.toString() ?? '',
       phone: map['phone']?.toString(),
       openingBalance: (map['opening_balance'] as num?)?.toDouble() ?? 0,
-      createdAt: DateTime.tryParse(map['created_at'] ?? '') ?? DateTime.now(),
+      // .toLocal() for consistent IST display (#7).
+      createdAt: DateTime.tryParse(map['created_at'] ?? '')?.toLocal() ?? DateTime.now(),
     );
   }
 }
@@ -219,7 +221,8 @@ class StockHistoryEntry {
       quantityBefore: (map['quantity_before'] as num?)?.toDouble() ?? 0,
       quantityAfter: (map['quantity_after'] as num?)?.toDouble() ?? 0,
       eventType: map['event_type']?.toString() ?? 'restock',
-      createdAt: DateTime.tryParse(map['created_at'] ?? '') ?? DateTime.now(),
+      // .toLocal() for consistent IST display (#7).
+      createdAt: DateTime.tryParse(map['created_at'] ?? '')?.toLocal() ?? DateTime.now(),
     );
   }
 }

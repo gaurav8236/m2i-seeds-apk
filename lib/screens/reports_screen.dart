@@ -677,10 +677,12 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
       ]);
       final ledger = results[0] as List<Map<String, dynamic>>;
       final allBills = results[1] as List<Bill>;
+      // Case-insensitive comparison so "Mayank"/"mayank" bills both appear (#58).
+      final nameLower = _customer.name.trim().toLowerCase();
       if (mounted) setState(() {
         _ledger = ledger;
         _customerBills = allBills
-            .where((b) => b.customerName == _customer.name)
+            .where((b) => b.customerName?.trim().toLowerCase() == nameLower)
             .toList();
       });
     } catch (e) {
@@ -750,6 +752,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                   try {
                     await SupabaseService.updateCustomer(
                       id: _customer.id,
+                      oldName: _customer.name,   // cascade rename to past_bills (#52)
                       name: nameCtrl.text.trim(),
                       phone: phoneCtrl.text.trim().isEmpty
                           ? null
@@ -1072,8 +1075,9 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
   Widget _ledgerRow(Map<String, dynamic> entry) {
     final type = entry['type'] as String? ?? 'sale';
     final amt = (entry['amount'] as num?)?.toDouble() ?? 0;
+    // .toLocal() converts UTC timestamp from Supabase to IST for display (#7).
     final date = entry['created_at'] != null
-        ? DateTime.tryParse(entry['created_at'] as String)
+        ? DateTime.tryParse(entry['created_at'] as String)?.toLocal()
         : null;
 
     // Visual treatment per transaction type:
