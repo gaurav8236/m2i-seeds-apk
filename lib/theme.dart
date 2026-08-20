@@ -18,6 +18,8 @@ class AppColors {
   static const textPrimary = Color(0xFF0F172A);
   static const textSecondary = Color(0xFF475569);
   static const textMuted = Color(0xFF64748B);
+  /// WhatsApp brand green — used only for share-via-WhatsApp actions.
+  static const whatsappGreen = Color(0xFF25D366);
 }
 
 final LinearGradient primaryGradient = const LinearGradient(

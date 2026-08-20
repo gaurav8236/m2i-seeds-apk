@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -1705,19 +1707,35 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
               padding: const EdgeInsets.all(20),
               child: Column(children: [
                 const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _downloadPdf,
-                    icon: const Icon(Icons.picture_as_pdf_outlined),
-                    label: const Text('PDF डाउनलोड', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      side: const BorderSide(color: AppColors.borderStrong),
+                // PDF actions — side by side
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _downloadPdf,
+                      icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                      label: const Text('PDF', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        side: const BorderSide(color: AppColors.borderStrong),
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _sharePdfOnWhatsApp,
+                      icon: const Icon(Icons.share_outlined, size: 18),
+                      label: const Text('शेयर करें', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        foregroundColor: AppColors.whatsappGreen,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        side: const BorderSide(color: AppColors.whatsappGreen),
+                      ),
+                    ),
+                  ),
+                ]),
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
