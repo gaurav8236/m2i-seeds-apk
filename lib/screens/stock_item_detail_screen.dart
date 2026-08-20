@@ -109,6 +109,20 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
       return;
     }
 
+    // I-01: validate custom category/unit when 'अन्य' is selected
+    if (_selectedCategory == _customSentinel &&
+        _customCategoryCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('अन्य श्रेणी का नाम भरें')));
+      return;
+    }
+    if (_selectedUnit == _customSentinel &&
+        _customUnitCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('अन्य इकाई का नाम भरें')));
+      return;
+    }
+
     setState(() => _saving = true);
     try {
       // Log restock if stock increased

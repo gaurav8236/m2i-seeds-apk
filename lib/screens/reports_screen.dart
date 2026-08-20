@@ -732,8 +732,8 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                 icon: Icons.savings_outlined,
                 value: 'deposit',
                 selected: entryType,
-                color: const Color(0xFF7C3AED),
-                bgColor: const Color(0xFFEDE9FE),
+                color: AppColors.advanceViolet,
+                bgColor: AppColors.advanceVioletLight,
                 onTap: () => setLocal(() => entryType = 'deposit'),
               ),
               const SizedBox(height: 14),
@@ -823,13 +823,16 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
         text: widget.customer.openingBalance.abs().toStringAsFixed(0));
     // true = debt (positive), false = advance (negative)
     bool isDebt = widget.customer.openingBalance >= 0;
+    // 'saving' is declared OUTSIDE the StatefulBuilder so it is not
+    // re-initialised to false every time setDialog() rebuilds the widget
+    // (e.g. when the user toggles the उधार/अग्रिम chips).
+    bool saving = false;
     final editFormKey = GlobalKey<FormState>();
 
     await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocal) {
-          bool saving = false;
+        builder: (ctx, setDialog) {
           return AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: Row(children: [
@@ -901,7 +904,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                         active: isDebt,
                         color: AppColors.danger,
                         bgColor: AppColors.dangerLight,
-                        onTap: () => setLocal(() => isDebt = true),
+                        onTap: () => setDialog(() => isDebt = true),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -909,9 +912,9 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                       child: _balanceChip(
                         label: 'अग्रिम',
                         active: !isDebt,
-                        color: const Color(0xFF7C3AED),
-                        bgColor: const Color(0xFFEDE9FE),
-                        onTap: () => setLocal(() => isDebt = false),
+                        color: AppColors.advanceViolet,
+                        bgColor: AppColors.advanceVioletLight,
+                        onTap: () => setDialog(() => isDebt = false),
                       ),
                     ),
                   ]),
@@ -943,43 +946,49 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                 child: const Text('रद्द करें',
                     style: TextStyle(color: AppColors.textMuted)),
               ),
-              StatefulBuilder(
-                builder: (ctx2, setSub) => ElevatedButton(
-                  onPressed: saving ? null : () async {
-                    if (!editFormKey.currentState!.validate()) return;
-                    setSub(() => saving = true);
-                    try {
-                      final raw = double.tryParse(balCtrl.text) ?? 0;
-                      final ob  = isDebt ? raw : -raw;
-                      final ph  = phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
-                      await SupabaseService.updateCustomer(
-                        id:             widget.customer.id,
-                        phone:          ph,
-                        openingBalance: ob,
-                      );
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      await _load();
-                    } catch (e) {
-                      setSub(() => saving = false);
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('त्रुटि: $e')));
-                      }
+              // Single StatefulBuilder (setDialog) drives both chip toggles
+              // and the saving state — no nested builder so 'saving' is never
+              // re-initialised on chip-toggle rebuilds.
+              ElevatedButton(
+                onPressed: saving ? null : () async {
+                  if (!editFormKey.currentState!.validate()) return;
+                  setDialog(() => saving = true);
+                  try {
+                    final raw = double.tryParse(balCtrl.text) ?? 0;
+                    final ob  = isDebt ? raw : -raw;
+                    final ph  = phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
+                    await SupabaseService.updateCustomer(
+                      id:             widget.customer.id,
+                      phone:          ph,
+                      openingBalance: ob,
+                    );
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    // Fix #5: confirm save to the shopkeeper
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('बदलाव सहेज दिए गए')));
                     }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                  ),
-                  child: saving
-                      ? const SizedBox(
-                          width: 18, height: 18,
-                          child: CircularProgressIndicator(
-                              color: Colors.white, strokeWidth: 2.5))
-                      : const Text('सहेजें',
-                          style: TextStyle(fontWeight: FontWeight.w700)),
+                    await _load();
+                  } catch (e) {
+                    setDialog(() => saving = false);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('त्रुटि: $e')));
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
                 ),
+                child: saving
+                    ? const SizedBox(
+                        width: 18, height: 18,
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2.5))
+                    : const Text('सहेजें',
+                        style: TextStyle(fontWeight: FontWeight.w700)),
               ),
             ],
           );
@@ -1021,8 +1030,10 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
 
   // ── C-06: Delete customer ──────────────────────────────────────────────────
   Future<void> _confirmDelete() async {
-    // Hard block: cannot delete while outstanding ≠ 0
-    if (_outstanding != 0) {
+    // Hard block: cannot delete while outstanding ≠ 0.
+    // Use a 0.50 epsilon — amounts are whole rupees so any sub-rupee
+    // residual is floating-point noise from accumulated arithmetic.
+    if (_outstanding.abs() >= 0.50) {
       showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -1407,8 +1418,8 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
     final ob       = widget.customer.openingBalance;
     final isDebt   = ob > 0;   // customer owes us
     final isAdv    = ob < 0;   // customer pre-paid (advance)
-    final color    = isDebt  ? AppColors.danger : const Color(0xFF7C3AED);
-    final bgColor  = isDebt  ? AppColors.dangerLight : const Color(0xFFEDE9FE);
+    final color    = isDebt  ? AppColors.danger : AppColors.advanceViolet;
+    final bgColor  = isDebt  ? AppColors.dangerLight : AppColors.advanceVioletLight;
     final icon     = isAdv   ? Icons.savings_outlined
                              : Icons.account_balance_wallet_outlined;
     final sign     = isDebt  ? '+' : '-';
@@ -1472,7 +1483,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
         amtText  = '-₹${amt.toStringAsFixed(0)}';
         break;
       case 'deposit':
-        rowColor = const Color(0xFF7C3AED);
+        rowColor = AppColors.advanceViolet;
         rowIcon  = Icons.savings_outlined;
         rowLabel = 'अग्रिम जमा';
         amtText  = '-₹${amt.toStringAsFixed(0)}';

@@ -20,6 +20,10 @@ class AppColors {
   static const textMuted = Color(0xFF64748B);
   /// WhatsApp brand green — used only for share-via-WhatsApp actions.
   static const whatsappGreen = Color(0xFF25D366);
+  /// Advance / deposit semantic colour (violet).
+  /// Used wherever a customer has pre-paid or we owe them a credit balance.
+  static const advanceViolet      = Color(0xFF7C3AED);
+  static const advanceVioletLight = Color(0xFFEDE9FE);
 }
 
 final LinearGradient primaryGradient = const LinearGradient(
