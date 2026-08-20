@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/supabase_service.dart';
@@ -811,6 +812,298 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
     amtCtrl.dispose();
   }
 
+  // ── C-05: Edit customer ────────────────────────────────────────────────────
+  Future<void> _showEditDialog() async {
+    // Name locked if the customer has any past bills (credit / cash / split)
+    final hasBills = _ledger.any(
+        (e) => ['credit', 'cash', 'split'].contains(e['type'] as String?));
+
+    final phoneCtrl   = TextEditingController(text: widget.customer.phone ?? '');
+    final balCtrl     = TextEditingController(
+        text: widget.customer.openingBalance.abs().toStringAsFixed(0));
+    // true = debt (positive), false = advance (negative)
+    bool isDebt = widget.customer.openingBalance >= 0;
+    final editFormKey = GlobalKey<FormState>();
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          bool saving = false;
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(children: [
+              const Icon(Icons.edit_outlined, size: 18, color: AppColors.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(widget.customer.name,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: 16)),
+              ),
+            ]),
+            content: SingleChildScrollView(
+              child: Form(
+                key: editFormKey,
+                autovalidateMode: AutovalidateMode.onUserInteraction,
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  // Name locked if bills exist
+                  if (hasBills)
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.warningLight,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppColors.warning.withOpacity(0.4)),
+                      ),
+                      child: Row(children: [
+                        const Icon(Icons.lock_outline,
+                            size: 14, color: AppColors.warning),
+                        const SizedBox(width: 6),
+                        const Expanded(
+                          child: Text(
+                            'पिछले बिल होने के कारण नाम नहीं बदला जा सकता',
+                            style: TextStyle(fontSize: 11, color: AppColors.warning),
+                          ),
+                        ),
+                      ]),
+                    ),
+                  if (hasBills) const SizedBox(height: 12),
+
+                  // Phone
+                  TextFormField(
+                    controller: phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(10),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: 'मोबाइल नंबर',
+                      prefixIcon: Icon(Icons.phone_outlined, size: 16),
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                      counterText: '',
+                    ),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return null;
+                      if (v.length != 10) return '10 अंक ज़रूरी हैं';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Opening balance type
+                  Row(children: [
+                    Expanded(
+                      child: _balanceChip(
+                        label: 'उधार',
+                        active: isDebt,
+                        color: AppColors.danger,
+                        bgColor: AppColors.dangerLight,
+                        onTap: () => setLocal(() => isDebt = true),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _balanceChip(
+                        label: 'अग्रिम',
+                        active: !isDebt,
+                        color: const Color(0xFF7C3AED),
+                        bgColor: const Color(0xFFEDE9FE),
+                        onTap: () => setLocal(() => isDebt = false),
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: balCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: 'शुरुआती बैलेंस',
+                      prefixText: '₹ ',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return null;
+                      if (double.tryParse(v) == null) return 'सही राशि डालें';
+                      return null;
+                    },
+                  ),
+                ]),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('रद्द करें',
+                    style: TextStyle(color: AppColors.textMuted)),
+              ),
+              StatefulBuilder(
+                builder: (ctx2, setSub) => ElevatedButton(
+                  onPressed: saving ? null : () async {
+                    if (!editFormKey.currentState!.validate()) return;
+                    setSub(() => saving = true);
+                    try {
+                      final raw = double.tryParse(balCtrl.text) ?? 0;
+                      final ob  = isDebt ? raw : -raw;
+                      final ph  = phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
+                      await SupabaseService.updateCustomer(
+                        id:             widget.customer.id,
+                        phone:          ph,
+                        openingBalance: ob,
+                      );
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      await _load();
+                    } catch (e) {
+                      setSub(() => saving = false);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('त्रुटि: $e')));
+                      }
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: saving
+                      ? const SizedBox(
+                          width: 18, height: 18,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2.5))
+                      : const Text('सहेजें',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    phoneCtrl.dispose();
+    balCtrl.dispose();
+  }
+
+  // Small chip used in the edit dialog
+  Widget _balanceChip({
+    required String label,
+    required bool active,
+    required Color color,
+    required Color bgColor,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: active ? bgColor : AppColors.bg,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+              color: active ? color : AppColors.border,
+              width: active ? 1.5 : 1),
+        ),
+        child: Text(label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: active ? color : AppColors.textSecondary)),
+      ),
+    );
+  }
+
+  // ── C-06: Delete customer ──────────────────────────────────────────────────
+  Future<void> _confirmDelete() async {
+    // Hard block: cannot delete while outstanding ≠ 0
+    if (_outstanding != 0) {
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(children: [
+            Icon(Icons.block, color: AppColors.danger, size: 20),
+            SizedBox(width: 8),
+            Text('हटाना संभव नहीं',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+          ]),
+          content: Text(
+            'ग्राहक पर अभी '
+            '${_outstanding > 0 ? "₹${_outstanding.toStringAsFixed(0)} बकाया" : "₹${_outstanding.abs().toStringAsFixed(0)} अग्रिम जमा"} '
+            'है। पहले इसे शून्य करें, फिर हटाएं।',
+            style: const TextStyle(fontSize: 13),
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('ठीक है'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(children: [
+          const Icon(Icons.delete_outline, color: AppColors.danger, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('${widget.customer.name} को हटाएं?',
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontWeight: FontWeight.w700, fontSize: 16)),
+          ),
+        ]),
+        content: const Text(
+          'यह ग्राहक और उसका पूरा लेनदेन इतिहास हमेशा के लिए हट जाएगा। '
+          'क्या आप सुनिश्चित हैं?',
+          style: TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('रद्द करें',
+                style: TextStyle(color: AppColors.textMuted)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.danger,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10))),
+            child: const Text('हटाएं',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    try {
+      await SupabaseService.deleteCustomer(widget.customer.id);
+      if (mounted) {
+        Navigator.pop(context); // go back to customer list
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('${widget.customer.name} हटाया गया')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('हटाने में त्रुटि: $e')));
+      }
+    }
+  }
+
   Widget _entryOption({
     required String label,
     required String sub,
@@ -875,7 +1168,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
               child: Column(children: [
-                // Back row + "दर्ज करें" button
+                // Back row + action buttons
                 Row(children: [
                   IconButton(
                     onPressed: () => Navigator.pop(context),
@@ -902,6 +1195,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                               color: Colors.white70, fontSize: 11)),
                     ]),
                   ),
+                  // + दर्ज करें
                   GestureDetector(
                     onTap: _showAddEntryDialog,
                     child: Container(
@@ -923,6 +1217,40 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                                 fontWeight: FontWeight.w600)),
                       ]),
                     ),
+                  ),
+                  const SizedBox(width: 6),
+                  // C-05 / C-06: edit & delete menu
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert, color: Colors.white),
+                    color: Colors.white,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    onSelected: (v) {
+                      if (v == 'edit')   _showEditDialog();
+                      if (v == 'delete') _confirmDelete();
+                    },
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
+                        value: 'edit',
+                        child: Row(children: [
+                          Icon(Icons.edit_outlined,
+                              size: 16, color: AppColors.primary),
+                          SizedBox(width: 10),
+                          Text('संपादित करें',
+                              style: TextStyle(color: AppColors.textPrimary)),
+                        ]),
+                      ),
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(children: [
+                          Icon(Icons.delete_outline,
+                              size: 16, color: AppColors.danger),
+                          SizedBox(width: 10),
+                          Text('हटाएं',
+                              style: TextStyle(color: AppColors.danger)),
+                        ]),
+                      ),
+                    ],
                   ),
                 ]),
                 const SizedBox(height: 16),
@@ -1011,7 +1339,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                         ]),
                       ),
                       if (_ledger.isEmpty &&
-                          widget.customer.openingBalance <= 0)
+                          widget.customer.openingBalance == 0)
                         const Padding(
                           padding: EdgeInsets.all(20),
                           child: Center(
@@ -1025,14 +1353,15 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                         ListView.separated(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
-                          // Newest-first display + optional opening balance row at bottom
+                          // Newest-first display + opening balance row at bottom
+                          // Show opening balance row for both debt (+) and advance (-)
                           itemCount: _ledger.length +
-                              (widget.customer.openingBalance > 0 ? 1 : 0),
+                              (widget.customer.openingBalance != 0 ? 1 : 0),
                           separatorBuilder: (_, __) => const Divider(
                               height: 1, color: AppColors.border),
                           itemBuilder: (_, i) {
-                            // Last row = opening balance
-                            if (widget.customer.openingBalance > 0 &&
+                            // Last row = opening balance (debt OR advance)
+                            if (widget.customer.openingBalance != 0 &&
                                 i == _ledger.length) {
                               return _openingBalanceRow();
                             }
@@ -1075,38 +1404,41 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
   }
 
   Widget _openingBalanceRow() {
-    final ob = widget.customer.openingBalance;
+    final ob       = widget.customer.openingBalance;
+    final isDebt   = ob > 0;   // customer owes us
+    final isAdv    = ob < 0;   // customer pre-paid (advance)
+    final color    = isDebt  ? AppColors.danger : const Color(0xFF7C3AED);
+    final bgColor  = isDebt  ? AppColors.dangerLight : const Color(0xFFEDE9FE);
+    final icon     = isAdv   ? Icons.savings_outlined
+                             : Icons.account_balance_wallet_outlined;
+    final sign     = isDebt  ? '+' : '-';
+    final label    = isDebt  ? 'शुरुआती बकाया' : 'शुरुआती अग्रिम';
+    final sublabel = isDebt  ? 'Opening Debt Balance' : 'Advance Pre-payment';
+    final balLabel = isDebt  ? 'उधार' : 'अग्रिम';
+
     return ListTile(
       contentPadding:
           const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
       leading: Container(
         width: 36,
         height: 36,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: AppColors.primaryLight,
-        ),
-        child: const Icon(Icons.account_balance_wallet_outlined,
-            size: 18, color: AppColors.primary),
+        decoration: BoxDecoration(shape: BoxShape.circle, color: bgColor),
+        child: Icon(icon, size: 18, color: color),
       ),
-      title: const Text('शुरुआती बकाया',
+      title: Text(label,
           style: TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 13,
-              color: AppColors.primary)),
-      subtitle: const Text('Opening Balance',
-          style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
+              fontWeight: FontWeight.w600, fontSize: 13, color: color)),
+      subtitle: Text(sublabel,
+          style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
       trailing: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Text('+₹${ob.toStringAsFixed(0)}',
-              style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                  color: AppColors.primary)),
-          const Text('बकाया',
-              style: TextStyle(fontSize: 9, color: AppColors.textMuted)),
+          Text('$sign₹${ob.abs().toStringAsFixed(0)}',
+              style: TextStyle(
+                  fontWeight: FontWeight.w700, fontSize: 13, color: color)),
+          Text(balLabel,
+              style: TextStyle(fontSize: 9, color: color)),
         ],
       ),
     );

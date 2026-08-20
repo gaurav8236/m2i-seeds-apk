@@ -256,6 +256,37 @@ class SupabaseService {
   }
 
   // Called before checkout to ensure customer exists in the customers table
+  // C-05: update phone / opening_balance. Name edits are blocked at the UI
+  // layer if the customer has any past bills.
+  static Future<void> updateCustomer({
+    required String id,
+    String? phone,       // pass '' to clear, null to leave unchanged
+    double? openingBalance,
+  }) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Not authenticated');
+    final updates = <String, dynamic>{};
+    if (phone != null) updates['phone'] = phone.isEmpty ? null : phone;
+    if (openingBalance != null) updates['opening_balance'] = openingBalance;
+    if (updates.isEmpty) return;
+    await _client
+        .from('customers')
+        .update(updates)
+        .eq('id', id)
+        .eq('user_id', userId);
+  }
+
+  // C-06: hard-delete. Caller MUST verify outstanding == 0 before calling.
+  static Future<void> deleteCustomer(String id) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Not authenticated');
+    await _client
+        .from('customers')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', userId);
+  }
+
   static Future<void> ensureCustomerExists(String customerName) async {
     final userId = _userId;
     if (userId == null) return;

@@ -19,8 +19,6 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
   StockHistoryEntry? _lastRestock;
 
   late final _nameCtrl = TextEditingController(text: widget.item.itemName);
-  late final _categoryCtrl = TextEditingController(text: widget.item.category);
-  late final _unitCtrl = TextEditingController(text: widget.item.unit);
   late final _priceCtrl =
       TextEditingController(text: widget.item.sellingPrice.toInt().toString());
   late final _stockCtrl = TextEditingController(
@@ -29,6 +27,47 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
   late double _lowStockLimit = widget.item.lowStockLimit;
   late List<String> _aliases = List.from(widget.item.aliases);
   bool _isDirty = false;
+
+  // I-01: category and unit are driven by dropdown selection.
+  // 'अन्य' sentinel triggers a custom text field below.
+  static const List<String> _categories = [
+    'अनाज', 'दाल', 'तेल', 'मसाले', 'नमकीन / स्नैक्स',
+    'बिस्किट / मिठाई', 'साबुन / डिटर्जेंट',
+    'पेय / कोल्ड ड्रिंक', 'डेयरी', 'अन्य',
+  ];
+  static const List<String> _units = [
+    'किलो', 'ग्राम', 'लीटर', 'मिली',
+    'नग', 'पैकेट', 'दर्जन', 'थैला', 'बोरी', 'अन्य',
+  ];
+  static const String _customSentinel = 'अन्य';
+
+  late String _selectedCategory = _canonicalCategory(widget.item.category);
+  late String _selectedUnit     = _canonicalUnit(widget.item.unit);
+  late final _customCategoryCtrl =
+      TextEditingController(text: _isCustomCategory ? widget.item.category : '');
+  late final _customUnitCtrl =
+      TextEditingController(text: _isCustomUnit ? widget.item.unit : '');
+
+  bool get _isCustomCategory => !_categories.contains(widget.item.category) ||
+      _selectedCategory == _customSentinel;
+  bool get _isCustomUnit => !_units.contains(widget.item.unit) ||
+      _selectedUnit == _customSentinel;
+
+  // Map item value to closest preset or 'अन्य'
+  String _canonicalCategory(String v) =>
+      _categories.contains(v) ? v : _customSentinel;
+  String _canonicalUnit(String v) =>
+      _units.contains(v) ? v : _customSentinel;
+
+  // Resolved value to save
+  String get _effectiveCategory =>
+      _selectedCategory == _customSentinel
+          ? _customCategoryCtrl.text.trim()
+          : _selectedCategory;
+  String get _effectiveUnit =>
+      _selectedUnit == _customSentinel
+          ? _customUnitCtrl.text.trim()
+          : _selectedUnit;
 
   @override
   void initState() {
@@ -39,11 +78,11 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
   @override
   void dispose() {
     _nameCtrl.dispose();
-    _categoryCtrl.dispose();
-    _unitCtrl.dispose();
     _priceCtrl.dispose();
     _stockCtrl.dispose();
     _aliasCtrl.dispose();
+    _customCategoryCtrl.dispose();
+    _customUnitCtrl.dispose();
     super.dispose();
   }
 
@@ -83,8 +122,8 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
 
       await SupabaseService.upsertInventoryItems([{
         'item_name': name,
-        'category': _categoryCtrl.text.trim(),
-        'unit': _unitCtrl.text.trim(),
+        'category': _effectiveCategory,
+        'unit': _effectiveUnit,
         'selling_price': price,
         'current_stock': newStock,
         'low_stock_limit': _lowStockLimit,
@@ -204,23 +243,50 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
                     onChanged: (_) => setState(() => _isDirty = true),
                     decoration: const InputDecoration(isDense: true)),
                 const SizedBox(height: 14),
+                // I-01: category and unit dropdowns
                 Row(children: [
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     _lbl('श्रेणी'),
                     const SizedBox(height: 6),
-                    TextField(controller: _categoryCtrl,
+                    _dropdownField(
+                      value: _selectedCategory,
+                      items: _categories,
+                      onChanged: (v) => setState(() {
+                        _selectedCategory = v!;
+                        _isDirty = true;
+                      }),
+                    ),
+                    if (_selectedCategory == _customSentinel) ...[
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: _customCategoryCtrl,
                         onChanged: (_) => setState(() => _isDirty = true),
                         decoration: const InputDecoration(
-                            hintText: 'अनाज', isDense: true)),
+                            hintText: 'श्रेणी लिखें', isDense: true),
+                      ),
+                    ],
                   ])),
                   const SizedBox(width: 10),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     _lbl('इकाई'),
                     const SizedBox(height: 6),
-                    TextField(controller: _unitCtrl,
+                    _dropdownField(
+                      value: _selectedUnit,
+                      items: _units,
+                      onChanged: (v) => setState(() {
+                        _selectedUnit = v!;
+                        _isDirty = true;
+                      }),
+                    ),
+                    if (_selectedUnit == _customSentinel) ...[
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: _customUnitCtrl,
                         onChanged: (_) => setState(() => _isDirty = true),
                         decoration: const InputDecoration(
-                            hintText: 'किलो', isDense: true)),
+                            hintText: 'इकाई लिखें', isDense: true),
+                      ),
+                    ],
                   ])),
                 ]),
                 const SizedBox(height: 14),
@@ -314,7 +380,7 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
-                        '${_lowStockLimit.toInt()} ${_unitCtrl.text.isNotEmpty ? _unitCtrl.text : 'units'}',
+                        '${_lowStockLimit.toInt()} ${_effectiveUnit.isNotEmpty ? _effectiveUnit : 'units'}',
                         style: const TextStyle(
                             color: AppColors.primary,
                             fontWeight: FontWeight.w700,
@@ -452,6 +518,24 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
         border: Border.all(color: AppColors.border),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
+    );
+  }
+
+  // I-01: shared styled dropdown
+  Widget _dropdownField({
+    required String value,
+    required List<String> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return DropdownButtonFormField<String>(
+      value: value,
+      isDense: true,
+      isExpanded: true,
+      decoration: const InputDecoration(isDense: true),
+      items: items
+          .map((e) => DropdownMenuItem(value: e, child: Text(e, overflow: TextOverflow.ellipsis)))
+          .toList(),
+      onChanged: onChanged,
     );
   }
 
