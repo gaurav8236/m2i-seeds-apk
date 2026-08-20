@@ -216,6 +216,9 @@ class SupabaseService {
         .from('past_bills')
         .select('total_amount, is_credit, transaction_type')
         .eq('user_id', userId)
+        // Always compare in UTC — Supabase stores created_at in UTC.
+        // Without .toUtc() a local DateTime (e.g. IST midnight) is sent as-is
+        // and Supabase treats it as UTC, shifting the filter by 5h30m for IST users.
         .gte('created_at', from.toUtc().toIso8601String())
         .lte('created_at', to.toUtc().toIso8601String())
         // Exclude payment receipts, deposits and cash loans — they are not sales.
@@ -277,7 +280,9 @@ class SupabaseService {
       } else if (resolvedType == 'split') {
         perCust[key] =
             perCust[key]! + (amount - nagad).clamp(0, double.infinity);
-      } else if (resolvedType == 'payment') {
+      } else if (resolvedType == 'payment' || resolvedType == 'deposit') {
+        // Only explicit payment receipts and deposits reduce outstanding.
+        // Cash sales ('sale' or pre-Sprint-3 NULL) have no outstanding impact.
         perCust[key] = perCust[key]! - amount;
       }
       // 'sale' is settled at point-of-sale — neutral for outstanding.
@@ -330,8 +335,8 @@ class SupabaseService {
     // Aggregate bill amounts + last activity date per customer name.
     // Key is lowercased + trimmed — case-insensitive dedup (bug #58).
     // Outstanding logic:
-    //   'credit'  → customer owes money  (adds to outstanding)
-    //   'payment' → customer paid        (subtracts from outstanding)
+    //   'credit'/'split' → customer owes money  (adds to outstanding)
+    //   'payment'/'deposit' → customer paid     (subtracts from outstanding)
     //   'sale'    → cash at point-of-sale (neutral — already settled)
     final Map<String, Map<String, dynamic>> agg = {};
     for (final bill in (billRes as List)) {
@@ -352,7 +357,7 @@ class SupabaseService {
         // Split bill: only (total - nagad) is still owed.
         agg[key]!['credit'] = (agg[key]!['credit'] as double) +
             (amt - nagad).clamp(0, double.infinity);
-      } else if (resolvedType == 'payment') {
+      } else if (resolvedType == 'payment' || resolvedType == 'deposit') {
         agg[key]!['paid'] = (agg[key]!['paid'] as double) + amt;
       }
       // 'sale' is neutral — no outstanding impact.
@@ -596,10 +601,13 @@ class SupabaseService {
   }
 
   static Future<StockHistoryEntry?> fetchLastRestock(String stockId) async {
+    final userId = _userId;
+    if (userId == null) return null;
     final res = await _client
         .from('stock_history')
         .select('*')
         .eq('stock_id', stockId)
+        .eq('user_id', userId)
         .eq('event_type', 'restock')
         .order('created_at', ascending: false)
         .limit(1);

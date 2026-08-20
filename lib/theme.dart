@@ -24,6 +24,16 @@ class AppColors {
   /// Used wherever a customer has pre-paid or we owe them a credit balance.
   static const advanceViolet      = Color(0xFF7C3AED);
   static const advanceVioletLight = Color(0xFFEDE9FE);
+  /// Bright green for text/icons rendered on dark gradient surfaces
+  /// (e.g. success screen header stats, highlighted totals on blue headers).
+  static const successOnDark = Color(0xFF4ADE80);
+  /// Two-stop gradient used on the bill-finalised success screen header.
+  static const successGradientDark = Color(0xFF064E3B);
+  static const successGradientMid  = Color(0xFF059669);
+  /// Second gradient stop for the recording-active (danger) mic button.
+  static const dangerMid = Color(0xFFEF4444);
+  /// Dark green for italic text rendered over successLight backgrounds.
+  static const successDarkText = Color(0xFF14532D);
 }
 
 final LinearGradient primaryGradient = const LinearGradient(
