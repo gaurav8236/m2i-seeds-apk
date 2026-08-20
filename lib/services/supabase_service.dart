@@ -20,7 +20,8 @@ class SupabaseService {
 
     final res = await _client
         .from('user_stock')
-        .select('id, current_stock, selling_price, low_stock_limit, aliases, master_inventory(item_name, category, unit)')
+        .select(
+            'id, current_stock, selling_price, low_stock_limit, aliases, master_inventory(item_name, category, unit)')
         .eq('user_id', userId);
 
     return (res as List).map((e) => StockItem.fromMap(e)).toList();
@@ -33,7 +34,8 @@ class SupabaseService {
     return (res as List).map((e) => MasterItem.fromMap(e)).toList();
   }
 
-  static Future<void> upsertInventoryItems(List<Map<String, dynamic>> items) async {
+  static Future<void> upsertInventoryItems(
+      List<Map<String, dynamic>> items) async {
     final userId = _userId;
     if (userId == null) return;
 
@@ -83,14 +85,11 @@ class SupabaseService {
 
     final productId = row['product_id']?.toString();
     if (productId != null && productId.isNotEmpty) {
-      await _client
-          .from('master_inventory')
-          .update({
-            'item_name': itemName.trim(),
-            'category': category.trim(),
-            'unit': unit.trim(),
-          })
-          .eq('id', productId);
+      await _client.from('master_inventory').update({
+        'item_name': itemName.trim(),
+        'category': category.trim(),
+        'unit': unit.trim(),
+      }).eq('id', productId);
     }
   }
 
@@ -176,7 +175,10 @@ class SupabaseService {
 
     final response = await http.post(
       Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-checkout/'),
-      headers: {'Content-Type': 'application/json', 'X-Api-Key': SupabaseConfig.apiSecret},
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Api-Key': SupabaseConfig.apiSecret
+      },
       body: jsonEncode({
         'user_id': userId,
         'total_bill_amount': totalAmount,
@@ -255,7 +257,8 @@ class SupabaseService {
     // Bills — primary source, must succeed.
     final billRes = await _client
         .from('past_bills')
-        .select('customer_name, total_amount, is_credit, transaction_type, nagad_amount')
+        .select(
+            'customer_name, total_amount, is_credit, transaction_type, nagad_amount')
         .eq('user_id', userId)
         .not('customer_name', 'is', null);
     for (final bill in (billRes as List)) {
@@ -272,7 +275,8 @@ class SupabaseService {
       if (resolvedType == 'credit') {
         perCust[key] = perCust[key]! + amount;
       } else if (resolvedType == 'split') {
-        perCust[key] = perCust[key]! + (amount - nagad).clamp(0, double.infinity);
+        perCust[key] =
+            perCust[key]! + (amount - nagad).clamp(0, double.infinity);
       } else if (resolvedType == 'payment') {
         perCust[key] = perCust[key]! - amount;
       }
@@ -291,8 +295,8 @@ class SupabaseService {
         if (custName.isEmpty) continue;
         final key = custName.toLowerCase();
         perCust.putIfAbsent(key, () => 0.0);
-        perCust[key] = perCust[key]! +
-            ((c['opening_balance'] as num?)?.toDouble() ?? 0);
+        perCust[key] =
+            perCust[key]! + ((c['opening_balance'] as num?)?.toDouble() ?? 0);
       }
     } catch (_) {
       // Customers table unavailable (RLS / network) — bills total is still valid.
@@ -318,7 +322,8 @@ class SupabaseService {
 
     final billRes = await _client
         .from('past_bills')
-        .select('customer_name, total_amount, is_credit, transaction_type, nagad_amount, created_at')
+        .select(
+            'customer_name, total_amount, is_credit, transaction_type, nagad_amount, created_at')
         .eq('user_id', userId)
         .not('customer_name', 'is', null);
 
@@ -333,7 +338,8 @@ class SupabaseService {
       final name = bill['customer_name']?.toString().trim() ?? '';
       if (name.isEmpty) continue;
       final key = name.toLowerCase();
-      agg.putIfAbsent(key, () => {'credit': 0.0, 'paid': 0.0, 'lastDate': null});
+      agg.putIfAbsent(
+          key, () => {'credit': 0.0, 'paid': 0.0, 'lastDate': null});
       final amt = (bill['total_amount'] as num?)?.toDouble() ?? 0;
       final txType = bill['transaction_type']?.toString();
       final resolvedType = (txType != null && txType.isNotEmpty)
@@ -344,7 +350,8 @@ class SupabaseService {
         agg[key]!['credit'] = (agg[key]!['credit'] as double) + amt;
       } else if (resolvedType == 'split') {
         // Split bill: only (total - nagad) is still owed.
-        agg[key]!['credit'] = (agg[key]!['credit'] as double) + (amt - nagad).clamp(0, double.infinity);
+        agg[key]!['credit'] = (agg[key]!['credit'] as double) +
+            (amt - nagad).clamp(0, double.infinity);
       } else if (resolvedType == 'payment') {
         agg[key]!['paid'] = (agg[key]!['paid'] as double) + amt;
       }
@@ -397,6 +404,33 @@ class SupabaseService {
     });
   }
 
+  // C-05: update phone / opening_balance. Name edits are blocked at the UI
+  // layer if the customer has any past bills.
+  static Future<void> updateCustomer({
+    required String id,
+    String? phone, // pass '' to clear, null to leave unchanged
+    double? openingBalance,
+  }) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Not authenticated');
+    final updates = <String, dynamic>{};
+    if (phone != null) updates['phone'] = phone.isEmpty ? null : phone;
+    if (openingBalance != null) updates['opening_balance'] = openingBalance;
+    if (updates.isEmpty) return;
+    await _client
+        .from('customers')
+        .update(updates)
+        .eq('id', id)
+        .eq('user_id', userId);
+  }
+
+  // C-06: hard-delete. Caller MUST verify outstanding == 0 before calling.
+  static Future<void> deleteCustomer(String id) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Not authenticated');
+    await _client.from('customers').delete().eq('id', id).eq('user_id', userId);
+  }
+
   // Called before checkout to ensure customer exists in the customers table.
   // Uses case-insensitive lookup first to avoid creating "Mayank"/"mayank"
   // duplicates (#58).
@@ -423,50 +457,23 @@ class SupabaseService {
     }
   }
 
-  static Future<void> updateCustomer({
-    required String id,
-    required String oldName,   // needed to cascade rename to past_bills (#52)
-    required String name,
-    String? phone,
-    required double openingBalance,
-  }) async {
-    final userId = _userId;
-    if (userId == null) throw Exception('Not authenticated');
-    final newName = name.trim();
-    await _client
-        .from('customers')
-        .update({
-          'name': newName,
-          'phone': phone != null && phone.trim().isNotEmpty ? phone.trim() : null,
-          'opening_balance': openingBalance,
-        })
-        .eq('id', id)
-        .eq('user_id', userId);
-
-    // Cascade rename to past_bills so ledger history stays intact after a
-    // customer name change (#52).
-    if (newName != oldName.trim()) {
-      await _client
-          .from('past_bills')
-          .update({'customer_name': newName})
-          .eq('user_id', userId)
-          .eq('customer_name', oldName.trim());
-    }
-  }
-
   // ── Customer Ledger ────────────────────────────────────────────────────────
 
-  static Future<List<Map<String, dynamic>>> fetchCustomerLedger(String customerName) async {
+  static Future<List<Map<String, dynamic>>> fetchCustomerLedger(
+      String customerName) async {
     final userId = _userId;
     if (userId == null) return [];
 
     // ilike = case-insensitive match — fixes "Mayank"/"mayank" split (#58).
     final res = await _client
         .from('past_bills')
-        .select('total_amount, is_credit, nagad_amount, transaction_type, created_at')
+        .select(
+            'total_amount, is_credit, nagad_amount, transaction_type, created_at')
         .eq('user_id', userId)
         .ilike('customer_name', customerName.trim())
-        .order('created_at', ascending: true); // ascending: running-balance computation needs oldest-first
+        .order('created_at',
+            ascending:
+                true); // ascending: running-balance computation needs oldest-first
 
     return (res as List).map((bill) {
       final txType = bill['transaction_type']?.toString();
@@ -497,7 +504,10 @@ class SupabaseService {
 
     final response = await http.post(
       Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-checkout/'),
-      headers: {'Content-Type': 'application/json', 'X-Api-Key': SupabaseConfig.apiSecret},
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Api-Key': SupabaseConfig.apiSecret
+      },
       body: jsonEncode({
         'user_id': userId,
         'total_bill_amount': amount,
@@ -537,7 +547,10 @@ class SupabaseService {
 
     final response = await http.post(
       Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-checkout/'),
-      headers: {'Content-Type': 'application/json', 'X-Api-Key': SupabaseConfig.apiSecret},
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Api-Key': SupabaseConfig.apiSecret
+      },
       body: jsonEncode({
         'user_id': userId,
         'total_bill_amount': amount,
@@ -598,7 +611,8 @@ class SupabaseService {
   // Units of a stock item sold this calendar month — scanned from bill_details
   // Returns true if a customer with [name] (case-insensitive) already exists
   // for this user, ignoring the customer with [excludeId] (for rename check #41).
-  static Future<bool> checkCustomerNameExists(String name, {String? excludeId}) async {
+  static Future<bool> checkCustomerNameExists(String name,
+      {String? excludeId}) async {
     final userId = _userId;
     if (userId == null) return false;
     // ilike = case-insensitive — catches "Ram" / "ram" / "RAM" as the same name.
@@ -614,7 +628,8 @@ class SupabaseService {
 
   // Returns true if another user_stock item (different id) already has [name]
   // (case-insensitive) for this user — used to prevent duplicate items (#32).
-  static Future<bool> checkItemNameExists(String name, {required String excludeStockId}) async {
+  static Future<bool> checkItemNameExists(String name,
+      {required String excludeStockId}) async {
     final userId = _userId;
     if (userId == null) return false;
     final res = await _client
@@ -643,7 +658,8 @@ class SupabaseService {
     // IST boundary in UTC (e.g. "2024-12-31T18:30:00Z" = Jan 1 IST midnight).
     final firstDay = DateTime(now.year, now.month, 1).toUtc().toIso8601String();
     // Upper bound: first of next month; DateTime handles month-13 overflow. (#19)
-    final monthEnd = DateTime(now.year, now.month + 1, 1).toUtc().toIso8601String();
+    final monthEnd =
+        DateTime(now.year, now.month + 1, 1).toUtc().toIso8601String();
 
     final res = await _client
         .from('past_bills')
@@ -658,7 +674,7 @@ class SupabaseService {
       final details =
           List<Map<String, dynamic>>.from(bill['bill_details'] ?? []);
       for (final item in details) {
-        final matchById   = item['stock_id']?.toString() == stockId;
+        final matchById = item['stock_id']?.toString() == stockId;
         // Fallback: match by item_name for pre-S5 bills where stock_id was
         // stale after the old name-keyed upsert RPC duplicated items (#19).
         final matchByName = nameLower != null &&
