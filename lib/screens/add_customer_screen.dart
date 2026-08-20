@@ -54,8 +54,9 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
         phone: phone,
         openingBalance: openingBalance,
       );
+      if (!mounted) return; // widget may have been disposed during network call
       setState(() => _isDirty = false);
-      if (mounted) Navigator.pop(context);
+      Navigator.pop(context);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -267,8 +268,8 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
                                 sub: 'ग्राहक ने पहले से दिया',
                                 icon: Icons.savings_outlined,
                                 active: !_isDebt,
-                                color: const Color(0xFF7C3AED),
-                                bgColor: const Color(0xFFEDE9FE),
+                                color: AppColors.advanceViolet,
+                                bgColor: AppColors.advanceVioletLight,
                                 onTap: () => setState(() {
                                   _isDebt = false;
                                   _isDirty = true;
@@ -296,7 +297,7 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
                                 size: 18,
                                 color: _isDebt
                                     ? AppColors.danger
-                                    : const Color(0xFF7C3AED),
+                                    : AppColors.advanceViolet,
                               ),
                             ),
                             onChanged: (_) => setState(() => _isDirty = true),
@@ -318,7 +319,7 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
                                 fontSize: 11,
                                 color: _isDebt
                                     ? AppColors.danger
-                                    : const Color(0xFF7C3AED),
+                                    : AppColors.advanceViolet,
                                 fontStyle: FontStyle.italic),
                           ),
 

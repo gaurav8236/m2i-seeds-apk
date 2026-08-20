@@ -170,6 +170,20 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
     final canonicalUnit = normalizeUnit(rawUnit) ?? rawUnit;
     final canonicalCategory = normalizeCategory(rawCategory) ?? rawCategory;
 
+    // Validate custom category/unit text when 'अन्य' is selected — the
+    // dropdown allows selecting 'अन्य' without ever touching the text field
+    // below it, which would otherwise save an empty category/unit.
+    if (_selCategory == 'अन्य' && _categoryCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('अन्य श्रेणी का नाम भरें')));
+      return;
+    }
+    if (_selUnit == 'अन्य' && _unitCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('अन्य इकाई का नाम भरें')));
+      return;
+    }
+
     // Guard against double-tap: set _saving before any async work so a
     // second tap while the name-check is in flight is a no-op.
     setState(() => _saving = true);
