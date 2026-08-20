@@ -29,7 +29,9 @@ class _PastBillsScreenState extends State<PastBillsScreen> {
       final bills = await SupabaseService.fetchPastBills();
       setState(() => _bills = bills);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('लोड नहीं हो सका: $e')));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('लोड नहीं हो सका: $e')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -38,7 +40,8 @@ class _PastBillsScreenState extends State<PastBillsScreen> {
   List<Bill> get _filtered {
     return _bills.where((b) {
       final q = _search.toLowerCase();
-      final nameMatch = (b.customerName ?? '').toLowerCase().contains(q) || q.isEmpty;
+      final nameMatch =
+          (b.customerName ?? '').toLowerCase().contains(q) || q.isEmpty;
       return nameMatch && _filter.matches(b);
     }).toList();
   }
@@ -54,7 +57,8 @@ class _PastBillsScreenState extends State<PastBillsScreen> {
             decoration: BoxDecoration(
               gradient: primaryGradient,
               borderRadius: const BorderRadius.only(
-                bottomLeft: Radius.circular(20), bottomRight: Radius.circular(20)),
+                  bottomLeft: Radius.circular(20),
+                  bottomRight: Radius.circular(20)),
             ),
             child: SafeArea(
               bottom: false,
@@ -68,23 +72,34 @@ class _PastBillsScreenState extends State<PastBillsScreen> {
                         icon: const Icon(Icons.arrow_back, color: Colors.white),
                         style: IconButton.styleFrom(
                           backgroundColor: Colors.white.withValues(alpha: 0.2),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
                         ),
                       ),
                     if (Navigator.canPop(context)) const SizedBox(width: 10),
                     Container(
-                      width: 32, height: 32,
+                      width: 32,
+                      height: 32,
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Icon(Icons.history, color: Colors.white, size: 17),
+                      child: const Icon(Icons.history,
+                          color: Colors.white, size: 17),
                     ),
                     const SizedBox(width: 8),
-                    const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('पुराने बिल', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
-                      Text('बिल इतिहास', style: TextStyle(color: Colors.white70, fontSize: 10)),
-                    ]),
+                    const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('पुराने बिल',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15)),
+                          Text('बिल इतिहास',
+                              style: TextStyle(
+                                  color: Colors.white70, fontSize: 10)),
+                        ]),
                   ]),
                 ]),
               ),
@@ -119,7 +134,9 @@ class _PastBillsScreenState extends State<PastBillsScreen> {
                     onRefresh: _load,
                     child: _filtered.isEmpty
                         ? const Center(
-                            child: Text('कोई बिल नहीं', style: TextStyle(color: AppColors.textMuted, fontSize: 14)),
+                            child: Text('कोई बिल नहीं',
+                                style: TextStyle(
+                                    color: AppColors.textMuted, fontSize: 14)),
                           )
                         : ListView.builder(
                             padding: const EdgeInsets.fromLTRB(14, 4, 14, 20),
