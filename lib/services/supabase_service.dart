@@ -68,11 +68,15 @@ class SupabaseService {
         .eq('user_id', userId)
         .not('customer_name', 'is', null);
 
-    final names = (res as List)
-        .map((e) => e['customer_name']?.toString().trim() ?? '')
-        .where((n) => n.isNotEmpty)
-        .toSet()
-        .toList();
+    // Case-insensitive dedup: keep the first-seen casing for display but
+    // ensure 'Ramesh' and 'ramesh' don't appear as two autocomplete entries.
+    final seen  = <String>{};
+    final names = <String>[];
+    for (final e in (res as List)) {
+      final raw = e['customer_name']?.toString().trim() ?? '';
+      if (raw.isEmpty) continue;
+      if (seen.add(raw.toLowerCase())) names.add(raw);
+    }
     return names;
   }
 
@@ -133,8 +137,11 @@ class SupabaseService {
         .from('past_bills')
         .select('total_amount, is_credit')
         .eq('user_id', userId)
-        .gte('created_at', from.toIso8601String())
-        .lte('created_at', to.toIso8601String())
+        // Always compare in UTC — Supabase stores created_at in UTC.
+        // Without .toUtc() a local DateTime (e.g. IST midnight) is sent as-is
+        // and Supabase treats it as UTC, shifting the filter by 5h30m for IST users.
+        .gte('created_at', from.toUtc().toIso8601String())
+        .lte('created_at', to.toUtc().toIso8601String())
         // Exclude payment receipts, deposits and cash loans — they are not sales.
         // Use OR to preserve pre-Sprint-3 rows where transaction_type IS NULL
         // (SQL NOT IN silently drops NULLs because NULL NOT IN (...) = NULL).
@@ -159,17 +166,20 @@ class SupabaseService {
 
     final res = await _client
         .from('past_bills')
-        .select('total_amount, is_credit, nagad_amount')
+        .select('total_amount, is_credit, nagad_amount, transaction_type')
         .eq('user_id', userId)
         .not('customer_name', 'is', null);
 
     double total = 0;
     for (final bill in (res as List)) {
       final amount = (bill['total_amount'] as num?)?.toDouble() ?? 0;
-      final nagad = (bill['nagad_amount'] as num?)?.toDouble() ?? 0;
+      final nagad  = (bill['nagad_amount'] as num?)?.toDouble() ?? 0;
+      final txType = (bill['transaction_type'] as String?)?.trim() ?? '';
       if (bill['is_credit'] == true) {
         total += (amount - nagad).clamp(0, double.infinity);
-      } else {
+      } else if (txType == 'payment' || txType == 'deposit') {
+        // Only explicit payment receipts and deposits reduce outstanding.
+        // Cash sales (txType='sale' or pre-Sprint-3 NULL) have no outstanding impact.
         total -= amount;
       }
     }
@@ -190,33 +200,39 @@ class SupabaseService {
 
     final billRes = await _client
         .from('past_bills')
-        .select('customer_name, total_amount, is_credit, nagad_amount, created_at')
+        .select('customer_name, total_amount, is_credit, nagad_amount, transaction_type, created_at')
         .eq('user_id', userId)
         .not('customer_name', 'is', null);
 
-    // Aggregate bill amounts + last purchase date per customer name
+    // Aggregate bill amounts + last purchase date per customer name.
+    // Key is lowercased so 'Ramesh' and 'ramesh' merge correctly (case-insensitive dedup).
     final Map<String, Map<String, dynamic>> agg = {};
     for (final bill in (billRes as List)) {
-      final name = bill['customer_name'] as String;
-      agg.putIfAbsent(name, () => {'credit': 0.0, 'paid': 0.0, 'lastDate': null});
-      final amt = (bill['total_amount'] as num?)?.toDouble() ?? 0;
-      final nagad = (bill['nagad_amount'] as num?)?.toDouble() ?? 0;
+      final name    = (bill['customer_name'] as String).trim();
+      final nameKey = name.toLowerCase();
+      agg.putIfAbsent(nameKey, () => {'credit': 0.0, 'paid': 0.0, 'lastDate': null});
+      final amt    = (bill['total_amount'] as num?)?.toDouble() ?? 0;
+      final nagad  = (bill['nagad_amount'] as num?)?.toDouble() ?? 0;
+      final txType = (bill['transaction_type'] as String?)?.trim() ?? '';
       if (bill['is_credit'] == true) {
         // For split bills: only (total - nagad) goes to outstanding
-        agg[name]!['credit'] = (agg[name]!['credit'] as double) + (amt - nagad).clamp(0, double.infinity);
-      } else {
-        agg[name]!['paid'] = (agg[name]!['paid'] as double) + amt;
+        agg[nameKey]!['credit'] = (agg[nameKey]!['credit'] as double) + (amt - nagad).clamp(0, double.infinity);
+      } else if (txType == 'payment' || txType == 'deposit') {
+        // Explicit payment / advance deposit — reduces outstanding.
+        // Cash sales (txType == 'sale' or '') have no impact on the unpaid balance.
+        agg[nameKey]!['paid'] = (agg[nameKey]!['paid'] as double) + amt;
       }
+      // is_credit=false + txType='sale' (or pre-Sprint-3 NULL): cash sale, no outstanding change.
       final date = DateTime.tryParse(bill['created_at'] as String? ?? '');
-      final existing = agg[name]!['lastDate'] as DateTime?;
+      final existing = agg[nameKey]!['lastDate'] as DateTime?;
       if (date != null && (existing == null || date.isAfter(existing))) {
-        agg[name]!['lastDate'] = date;
+        agg[nameKey]!['lastDate'] = date;
       }
     }
 
     final customers = (custRes as List).map((c) {
       final customer = Customer.fromMap(c);
-      final data = agg[customer.name];
+      final data = agg[customer.name.toLowerCase()];
       if (data != null) {
         final credit = data['credit'] as double;
         final paid = data['paid'] as double;
@@ -430,10 +446,13 @@ class SupabaseService {
   }
 
   static Future<StockHistoryEntry?> fetchLastRestock(String stockId) async {
+    final userId = _userId;
+    if (userId == null) return null;
     final res = await _client
         .from('stock_history')
         .select('*')
         .eq('stock_id', stockId)
+        .eq('user_id', userId)
         .eq('event_type', 'restock')
         .order('created_at', ascending: false)
         .limit(1);
@@ -448,7 +467,7 @@ class SupabaseService {
     if (userId == null) return 0;
 
     final now = DateTime.now();
-    final firstDay = DateTime(now.year, now.month, 1).toIso8601String();
+    final firstDay = DateTime(now.year, now.month, 1).toUtc().toIso8601String();
 
     final res = await _client
         .from('past_bills')

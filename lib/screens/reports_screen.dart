@@ -368,9 +368,9 @@ class _ReportsScreenState extends State<ReportsScreen>
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
               color: hasOutstanding
-                  ? const Color(0xFFFFCACA)
+                  ? AppColors.dangerLight
                   : hasCredit
-                      ? const Color(0xFFBBF7D0)
+                      ? AppColors.successLight
                       : AppColors.border),
         ),
         child: Row(children: [
@@ -646,6 +646,11 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
       final data = await SupabaseService.fetchCustomerLedger(widget.customer.name);
       _ledger = data;
       _computeRunningBalances();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('लेजर लोड नहीं हो सका: $e')));
+      }
     } finally {
       setState(() => _loading = false);
     }
@@ -704,12 +709,15 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
   Future<void> _showAddEntryDialog() async {
     String entryType = 'payment';
     final amtCtrl = TextEditingController();
+    // 'submitting' is declared OUTSIDE the StatefulBuilder so it is not
+    // re-initialised to false whenever the payment/deposit chip toggle calls
+    // setLocal() and rebuilds the closure (same fix applied to _showEditDialog).
+    bool submitting = false;
 
     await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) {
-          bool submitting = false;
           return AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: const Text('लेनदेन दर्ज करें',
@@ -754,55 +762,55 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                 child: const Text('रद्द करें',
                     style: TextStyle(color: AppColors.textMuted)),
               ),
-              StatefulBuilder(
-                builder: (ctx2, setSub) => ElevatedButton(
-                  onPressed: submitting
-                      ? null
-                      : () async {
-                          final amt = double.tryParse(amtCtrl.text);
-                          if (amt == null || amt <= 0) return;
-                          setSub(() => submitting = true);
-                          try {
-                            if (entryType == 'payment') {
-                              await SupabaseService.recordPayment(
-                                  customerName: widget.customer.name,
-                                  amount: amt);
-                            } else {
-                              await SupabaseService.recordDeposit(
-                                  customerName: widget.customer.name,
-                                  amount: amt);
-                            }
-                            if (ctx.mounted) Navigator.pop(ctx);
-                            await _load();
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                                  content: Text(
-                                      '₹${amt.toStringAsFixed(0)} दर्ज किया')));
-                            }
-                          } catch (e) {
-                            setSub(() => submitting = false);
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('त्रुटि: $e')));
-                            }
+              // Single setLocal drives both chip toggles and the submitting
+              // state — no nested builder so 'submitting' is never re-initialised.
+              ElevatedButton(
+                onPressed: submitting
+                    ? null
+                    : () async {
+                        final amt = double.tryParse(amtCtrl.text);
+                        if (amt == null || amt <= 0) return;
+                        setLocal(() => submitting = true);
+                        try {
+                          if (entryType == 'payment') {
+                            await SupabaseService.recordPayment(
+                                customerName: widget.customer.name,
+                                amount: amt);
+                          } else {
+                            await SupabaseService.recordDeposit(
+                                customerName: widget.customer.name,
+                                amount: amt);
                           }
-                        },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 12),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                  ),
-                  child: submitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                              color: Colors.white, strokeWidth: 2.5))
-                      : const Text('दर्ज करें',
-                          style: TextStyle(fontWeight: FontWeight.w700)),
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          await _load();
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                content: Text(
+                                    '₹${amt.toStringAsFixed(0)} दर्ज किया')));
+                          }
+                        } catch (e) {
+                          setLocal(() => submitting = false);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('त्रुटि: $e')));
+                          }
+                        }
+                      },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
                 ),
+                child: submitting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2.5))
+                    : const Text('दर्ज करें',
+                        style: TextStyle(fontWeight: FontWeight.w700)),
               ),
             ],
           );
@@ -1399,7 +1407,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
       Text(value,
           style: TextStyle(
               color: highlight
-                  ? (isGreen ? const Color(0xFF4ADE80) : Colors.white)
+                  ? (isGreen ? AppColors.successOnDark : Colors.white)
                   : Colors.white,
               fontWeight: FontWeight.w800,
               fontSize: highlight ? 16 : 14,
@@ -1470,7 +1478,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
 
     switch (type) {
       case 'split':
-        rowColor = Colors.orange.shade700;
+        rowColor = AppColors.warning;
         rowIcon  = Icons.call_split;
         rowLabel = 'आंशिक नकद+उधार';
         final udhar = (amt - nagad).clamp(0, double.infinity);

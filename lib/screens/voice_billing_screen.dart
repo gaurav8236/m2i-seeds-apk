@@ -285,6 +285,12 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
   }
 
   Future<void> _finalizeBill() async {
+    // Business rule: a credit (उधार) bill must be tied to a named customer so
+    // that repayment can be tracked in their ledger.
+    if (_isCredit && _customerName.trim().isEmpty) {
+      _showSnack('उधार बिल के लिए ग्राहक का नाम ज़रूरी है');
+      return;
+    }
     setState(() => _isProcessing = true);
     try {
       final validItems = _billItems.where((i) => i.itemName.isNotEmpty).toList();
@@ -542,7 +548,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
                 bottomLeft: Radius.circular(20),
                 bottomRight: Radius.circular(20),
               ),
-              boxShadow: [BoxShadow(color: const Color(0xFF0D47A1).withOpacity(0.25), blurRadius: 16, offset: const Offset(0, 4))],
+              boxShadow: [BoxShadow(color: AppColors.primaryDark.withOpacity(0.25), blurRadius: 16, offset: const Offset(0, 4))],
             ),
             child: SafeArea(
               bottom: false,
@@ -675,7 +681,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
                         shape: BoxShape.circle,
                         gradient: _isRecording
                             ? const LinearGradient(
-                                colors: [Color(0xFFDC2626), Color(0xFFEF4444)],
+                                colors: [AppColors.danger, AppColors.dangerMid],
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
                               )
@@ -745,7 +751,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: AppColors.successLight,
-                border: Border.all(color: const Color(0xFFBBF7D0)),
+                border: Border.all(color: AppColors.successLight),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -753,7 +759,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
                     style: TextStyle(color: AppColors.success, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.6)),
                 const SizedBox(height: 4),
                 Text('"$_spokenText"',
-                    style: const TextStyle(fontSize: 14, color: Color(0xFF14532D), fontStyle: FontStyle.italic)),
+                    style: const TextStyle(fontSize: 14, color: AppColors.successDarkText, fontStyle: FontStyle.italic)),
               ]),
             ),
           ],
@@ -1255,7 +1261,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
                               _isSplit = v;
                               if (!v) _nagadCtrl.clear();
                             }),
-                            activeColor: Colors.orange.shade700,
+                            activeColor: AppColors.warning,
                           ),
                         ],
                       ),
@@ -1285,17 +1291,17 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                               decoration: BoxDecoration(
-                                color: Colors.orange.shade50,
+                                color: AppColors.warningLight,
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.orange.shade200),
+                                border: Border.all(color: AppColors.warning.withOpacity(0.35)),
                               ),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text('बकाया रहेगा:',
-                                      style: TextStyle(fontSize: 12, color: Colors.orange.shade800, fontWeight: FontWeight.w600)),
+                                      style: TextStyle(fontSize: 12, color: AppColors.warning, fontWeight: FontWeight.w600)),
                                   Text('₹${udharAmt.toStringAsFixed(0)}',
-                                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.orange.shade800)),
+                                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.warning)),
                                 ],
                               ),
                             ),
@@ -1387,7 +1393,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
             width: double.infinity,
             decoration: const BoxDecoration(
               gradient: LinearGradient(
-                colors: [Color(0xFF064E3B), Color(0xFF059669)],
+                colors: [AppColors.successGradientDark, AppColors.successGradientMid],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
