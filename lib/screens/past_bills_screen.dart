@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../models/models.dart';
 import '../services/supabase_service.dart';
 import '../theme.dart';
+import '../utils/devanagari.dart';
 
 class PastBillsScreen extends StatefulWidget {
   const PastBillsScreen({super.key});
@@ -250,48 +252,73 @@ class _BillDetailSheet extends StatelessWidget {
       n >= 1000 ? '₹${(n / 1000).toStringAsFixed(1)}k' : '₹${n.toStringAsFixed(0)}';
 
   Future<void> _printPdf(BuildContext context) async {
+    // Load Noto Devanagari fonts so Hindi text renders correctly in PDF
+    final bold        = await PdfGoogleFonts.notoSansBold();
+    final devaRegular = await PdfGoogleFonts.notoSansDevanagariRegular();
+    final devaBold    = await PdfGoogleFonts.notoSansDevanagariBold();
+
+    const grey  = PdfColor.fromInt(0xFF6B7280);
+    const black = PdfColors.black;
+
+    pw.TextStyle deva({double size = 10, bool isBold = false, PdfColor? color}) =>
+        pw.TextStyle(font: isBold ? devaBold : devaRegular, fontSize: size, color: color);
+
     final pdf = pw.Document();
     pdf.addPage(pw.Page(
       build: (ctx) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Center(
-            child: pw.Text('SmartDukan',
-                style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 18)),
-          ),
-          pw.Center(child: pw.Text('दुकानदार सहायक', style: const pw.TextStyle(fontSize: 11))),
+          pw.Center(child: pw.Text('SmartDukan',
+              style: pw.TextStyle(font: bold, fontSize: 18, color: black))),
+          pw.Center(child: pw.Text(fixDevanagariMatra('दुकानदार सहायक'),
+              style: deva(size: 11, color: grey))),
           pw.SizedBox(height: 10),
           pw.Divider(),
-          pw.Text('दिनांक: ${DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt)}'),
-          if (bill.customerName != null) pw.Text('ग्राहक: ${bill.customerName}'),
-          pw.Text(bill.isCredit ? 'भुगतान: उधार' : 'भुगतान: नकद'),
+          pw.Text(fixDevanagariMatra('दिनांक: ${DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt)}'),
+              style: deva()),
+          if (bill.customerName != null)
+            pw.Text(fixDevanagariMatra('ग्राहक: ${bill.customerName}'), style: deva()),
+          pw.Text(fixDevanagariMatra(bill.isCredit ? 'भुगतान: उधार' : 'भुगतान: नकद'),
+              style: deva()),
           pw.Divider(),
           pw.Table(
             border: pw.TableBorder.all(width: 0.5),
             children: [
               pw.TableRow(children: [
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('आइटम', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('इकाई', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('दर', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('मात्रा', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('कुल', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text(fixDevanagariMatra('आइटम'), style: deva(isBold: true))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text(fixDevanagariMatra('इकाई'), style: deva(isBold: true))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text(fixDevanagariMatra('दर'), style: deva(isBold: true))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text(fixDevanagariMatra('मात्रा'), style: deva(isBold: true))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text(fixDevanagariMatra('कुल'), style: deva(isBold: true))),
               ]),
               ...bill.billDetails.map((item) => pw.TableRow(children: [
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text(item['item_name'] ?? '')),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text(item['unit'] ?? '-')),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('₹${item['price_per_unit'] ?? 0}')),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('${item['quantity_billed'] ?? 0}')),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('₹${item['item_total'] ?? 0}')),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text(fixDevanagariMatra(item['item_name'] ?? ''), style: deva())),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text(fixDevanagariMatra(item['unit'] ?? '-'), style: deva())),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text('₹${item['price_per_unit'] ?? 0}', style: deva())),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text('${item['quantity_billed'] ?? 0}', style: deva())),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text('₹${item['item_total'] ?? 0}', style: deva())),
               ])),
             ],
           ),
           pw.SizedBox(height: 8),
           if ((bill.discountAmount ?? 0) > 0)
-            pw.Text('छूट: -₹${bill.discountAmount!.toStringAsFixed(2)}'),
-          pw.Text('कुल: ₹${bill.totalAmount.toStringAsFixed(2)}',
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14)),
+            pw.Text(fixDevanagariMatra('छूट: -₹${bill.discountAmount!.toStringAsFixed(2)}'),
+                style: deva()),
+          pw.Text(fixDevanagariMatra('कुल: ₹${bill.totalAmount.toStringAsFixed(2)}'),
+              style: deva(size: 14, isBold: true)),
           pw.SizedBox(height: 16),
-          pw.Center(child: pw.Text('धन्यवाद! फिर पधारें।')),
+          pw.Center(child: pw.Text(fixDevanagariMatra('धन्यवाद! फिर पधारें।'),
+              style: deva(color: grey))),
         ],
       ),
     ));

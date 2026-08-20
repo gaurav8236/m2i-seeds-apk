@@ -95,7 +95,7 @@ class SupabaseService {
 
     final response = await http.post(
       Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-checkout/'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'X-Api-Key': SupabaseConfig.apiSecret},
       body: jsonEncode({
         'user_id': userId,
         'total_bill_amount': totalAmount,
@@ -134,7 +134,11 @@ class SupabaseService {
         .select('total_amount, is_credit')
         .eq('user_id', userId)
         .gte('created_at', from.toIso8601String())
-        .lte('created_at', to.toIso8601String());
+        .lte('created_at', to.toIso8601String())
+        // Exclude payment receipts, deposits and cash loans — they are not sales.
+        // Use OR to preserve pre-Sprint-3 rows where transaction_type IS NULL
+        // (SQL NOT IN silently drops NULLs because NULL NOT IN (...) = NULL).
+        .or('transaction_type.is.null,transaction_type.not.in.(payment,deposit,cash_loan)');
 
     double credit = 0, paid = 0;
     for (final bill in (res as List)) {
@@ -310,7 +314,7 @@ class SupabaseService {
 
     final response = await http.post(
       Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-checkout/'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'X-Api-Key': SupabaseConfig.apiSecret},
       body: jsonEncode({
         'user_id': userId,
         'total_bill_amount': amount,
@@ -349,7 +353,7 @@ class SupabaseService {
 
     final response = await http.post(
       Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-checkout/'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'X-Api-Key': SupabaseConfig.apiSecret},
       body: jsonEncode({
         'user_id': userId,
         'total_bill_amount': amount,

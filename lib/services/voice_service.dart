@@ -45,6 +45,7 @@ class VoiceService {
       'POST',
       Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-search/'),
     );
+    request.headers['X-Api-Key'] = SupabaseConfig.apiSecret;
 
     request.files.add(await http.MultipartFile.fromPath('file', audioPath,
         filename: 'recording.m4a'));

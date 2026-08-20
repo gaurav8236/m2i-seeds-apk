@@ -1,10 +1,16 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:printing/printing.dart';
+import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../models/models.dart';
+import '../utils/devanagari.dart';
 import '../services/draft_service.dart';
 import '../services/supabase_service.dart';
 import '../services/voice_service.dart';
@@ -311,50 +317,111 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
     }
   }
 
-  Future<void> _downloadPdf() async {
+  /// Builds the bill PDF bytes with Noto Devanagari fonts so Hindi text
+  /// renders correctly. Called by both _downloadPdf and _sharePdfOnWhatsApp.
+  Future<Uint8List> _buildBillPdfBytes() async {
+    // Load fonts — PdfGoogleFonts is bundled in the printing package
+    final bold        = await PdfGoogleFonts.notoSansBold();
+    final devaRegular = await PdfGoogleFonts.notoSansDevanagariRegular();
+    final devaBold    = await PdfGoogleFonts.notoSansDevanagariBold();
+
+    const grey  = PdfColor.fromInt(0xFF6B7280);
+    const black = PdfColors.black;
+
+    // Helper: styled text with the Devanagari font.
+    // Parameter renamed isBold to avoid shadowing the outer pw.Font `bold`.
+    pw.TextStyle deva({double size = 10, bool isBold = false, PdfColor? color}) =>
+        pw.TextStyle(
+          font: isBold ? devaBold : devaRegular,
+          fontSize: size,
+          color: color,
+        );
+
     final pdf = pw.Document();
     pdf.addPage(pw.Page(
       build: (ctx) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
           pw.Center(child: pw.Text('SmartDukan',
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 18))),
-          pw.Center(child: pw.Text('दुकानदार सहायक', style: const pw.TextStyle(fontSize: 11))),
+              style: pw.TextStyle(font: bold, fontSize: 18, color: black))),
+          pw.Center(child: pw.Text(fixDevanagariMatra('दुकानदार सहायक'),
+              style: deva(size: 11, color: grey))),
           pw.SizedBox(height: 10),
           pw.Divider(),
-          pw.Text('दिनांक: ${DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now())}'),
-          if (_customerName.isNotEmpty) pw.Text('ग्राहक: $_customerName'),
-          pw.Text(_isCredit ? 'भुगतान: उधार' : 'भुगतान: नकद'),
+          pw.Text(fixDevanagariMatra('दिनांक: ${DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now())}'),
+              style: deva()),
+          if (_customerName.isNotEmpty)
+            pw.Text(fixDevanagariMatra('ग्राहक: $_customerName'), style: deva()),
+          pw.Text(fixDevanagariMatra(_isCredit ? 'भुगतान: उधार' : 'भुगतान: नकद'),
+              style: deva()),
           pw.Divider(),
           pw.Table(
             border: pw.TableBorder.all(width: 0.5),
             children: [
               pw.TableRow(children: [
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('आइटम', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('इकाई', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('दर', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('मात्रा', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('कुल', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text(fixDevanagariMatra('आइटम'), style: deva(isBold: true))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text(fixDevanagariMatra('इकाई'), style: deva(isBold: true))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text(fixDevanagariMatra('दर'), style: deva(isBold: true))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text(fixDevanagariMatra('मात्रा'), style: deva(isBold: true))),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text(fixDevanagariMatra('कुल'), style: deva(isBold: true))),
               ]),
               ..._billItems.map((item) => pw.TableRow(children: [
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text(item.itemName)),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text(_getUnit(item))),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('₹${item.pricePerUnit}')),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('${item.quantity}')),
-                pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('₹${item.itemTotal}')),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text(fixDevanagariMatra(item.itemName), style: deva())),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text(fixDevanagariMatra(_getUnit(item)), style: deva())),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text('₹${item.pricePerUnit}', style: deva())),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text('${item.quantity}', style: deva())),
+                pw.Padding(padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text('₹${item.itemTotal}', style: deva())),
               ])),
             ],
           ),
           pw.SizedBox(height: 8),
-          if (_discount > 0) pw.Text('छूट: -₹${_discount.toStringAsFixed(2)}'),
-          pw.Text('कुल: ₹${_finalTotal.toStringAsFixed(2)}',
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14)),
+          if (_discount > 0)
+            pw.Text(fixDevanagariMatra('छूट: -₹${_discount.toStringAsFixed(2)}'),
+                style: deva()),
+          pw.Text(fixDevanagariMatra('कुल: ₹${_finalTotal.toStringAsFixed(2)}'),
+              style: deva(size: 14, isBold: true)),
           pw.SizedBox(height: 16),
-          pw.Center(child: pw.Text('धन्यवाद! फिर पधारें।')),
+          pw.Center(child: pw.Text(fixDevanagariMatra('धन्यवाद! फिर पधारें।'),
+              style: deva(color: grey))),
         ],
       ),
     ));
-    await Printing.layoutPdf(onLayout: (_) async => pdf.save());
+    return Uint8List.fromList(await pdf.save());
+  }
+
+  Future<void> _downloadPdf() async {
+    try {
+      await Printing.layoutPdf(onLayout: (_) async => _buildBillPdfBytes());
+    } catch (e) {
+      if (mounted) _showSnack('PDF बनाने में त्रुटि: $e');
+    }
+  }
+
+  Future<void> _sharePdfOnWhatsApp() async {
+    try {
+      final bytes = await _buildBillPdfBytes();
+      final dir   = await getTemporaryDirectory();
+      final file  = File('${dir.path}/bill_${DateTime.now().millisecondsSinceEpoch}.pdf');
+      await file.writeAsBytes(bytes);
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'application/pdf')],
+        text: 'SmartDukan बिल — ₹${_finalTotal.toStringAsFixed(0)}',
+      );
+      // Clean up the temp file once the share sheet has dismissed
+      if (await file.exists()) await file.delete();
+    } catch (e) {
+      if (mounted) _showSnack('शेयर में त्रुटि: $e');
+    }
   }
 
   void _resetBill() {
@@ -1380,19 +1447,35 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen>
               padding: const EdgeInsets.all(20),
               child: Column(children: [
                 const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _downloadPdf,
-                    icon: const Icon(Icons.picture_as_pdf_outlined),
-                    label: const Text('PDF डाउनलोड', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      side: const BorderSide(color: AppColors.borderStrong),
+                // PDF actions — side by side
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _downloadPdf,
+                      icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                      label: const Text('PDF', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        side: const BorderSide(color: AppColors.borderStrong),
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _sharePdfOnWhatsApp,
+                      icon: const Icon(Icons.share_outlined, size: 18),
+                      label: const Text('शेयर करें', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        foregroundColor: AppColors.whatsappGreen,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        side: const BorderSide(color: AppColors.whatsappGreen),
+                      ),
+                    ),
+                  ),
+                ]),
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
