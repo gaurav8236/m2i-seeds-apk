@@ -15,6 +15,10 @@ allprojects {
         google()
         mavenCentral()
         mavenLocal()
+        // LogRocket's Android SDK (com.logrocket:logrocket) is not published to
+        // Maven Central / Google's Maven — it lives in its own bucket-backed repo.
+        // https://docs.logrocket.com/reference/android
+        maven { url "https://storage.googleapis.com/logrocket-maven/" }
     }
 }
 
