@@ -250,7 +250,16 @@ class SupabaseService {
   //
   // Uses per-customer clamping (not a single aggregate clamp) so that an
   // overpayment by Customer A never cancels Customer B's outstanding (#48).
-  static Future<double> fetchTotalOutstanding() async {
+  //
+  // Perf note (2026-09-13 diagnosis): pass `bills` when the caller already
+  // has a fresh full-history fetch (e.g. Home/Reports load both this and
+  // fetchPastBills() together) so this doesn't issue its own redundant
+  // past_bills query. Still walks ALL-TIME history either way — bounding
+  // *which* bills feed this calculation would risk undercounting a real
+  // khata balance, so only the redundant fetch is removed here, not the
+  // all-time scope. Omit `bills` to fetch independently (back-compat for
+  // any other caller).
+  static Future<double> fetchTotalOutstanding({List<Bill>? bills}) async {
     final userId = _userId;
     if (userId == null) return 0;
 
@@ -258,23 +267,18 @@ class SupabaseService {
     final Map<String, double> perCust = {};
 
     // Bills — primary source, must succeed.
-    final billRes = await _client
-        .from('past_bills')
-        .select(
-            'customer_name, total_amount, is_credit, transaction_type, nagad_amount')
-        .eq('user_id', userId)
-        .not('customer_name', 'is', null);
-    for (final bill in (billRes as List)) {
-      final custName = bill['customer_name']?.toString().trim() ?? '';
+    final List<Bill> billList = bills ??
+        await fetchPastBills().then(
+          (all) => all.where((b) => (b.customerName ?? '').isNotEmpty).toList(),
+        );
+    for (final bill in billList) {
+      final custName = bill.customerName?.trim() ?? '';
       if (custName.isEmpty) continue;
       final key = custName.toLowerCase();
       perCust.putIfAbsent(key, () => 0.0);
-      final amount = (bill['total_amount'] as num?)?.toDouble() ?? 0;
-      final txType = bill['transaction_type']?.toString();
-      final resolvedType = (txType != null && txType.isNotEmpty)
-          ? txType
-          : (bill['is_credit'] == true ? 'credit' : 'sale');
-      final nagad = (bill['nagad_amount'] as num?)?.toDouble() ?? 0;
+      final amount = bill.totalAmount;
+      final resolvedType = bill.transactionType;
+      final nagad = bill.nagadAmount;
       if (resolvedType == 'credit') {
         perCust[key] = perCust[key]! + amount;
       } else if (resolvedType == 'split') {
@@ -315,7 +319,12 @@ class SupabaseService {
 
   // ── Customers ──────────────────────────────────────────────────────────────
 
-  static Future<List<Customer>> fetchCustomers() async {
+  // Perf note (2026-09-13 diagnosis): pass `bills` when the caller already
+  // has a fresh full-history fetch (Home/Reports load both this and
+  // fetchPastBills() together) so this doesn't issue its own redundant
+  // past_bills query. Still walks ALL-TIME history either way — see
+  // fetchTotalOutstanding()'s note above, same reasoning applies here.
+  static Future<List<Customer>> fetchCustomers({List<Bill>? bills}) async {
     final userId = _userId;
     if (userId == null) return [];
 
@@ -325,12 +334,10 @@ class SupabaseService {
         .eq('user_id', userId)
         .order('name');
 
-    final billRes = await _client
-        .from('past_bills')
-        .select(
-            'customer_name, total_amount, is_credit, transaction_type, nagad_amount, created_at')
-        .eq('user_id', userId)
-        .not('customer_name', 'is', null);
+    final List<Bill> billList = bills ??
+        await fetchPastBills().then(
+          (all) => all.where((b) => (b.customerName ?? '').isNotEmpty).toList(),
+        );
 
     // Aggregate bill amounts + last activity date per customer name.
     // Key is lowercased + trimmed — case-insensitive dedup (bug #58).
@@ -339,18 +346,15 @@ class SupabaseService {
     //   'payment'/'deposit' → customer paid     (subtracts from outstanding)
     //   'sale'    → cash at point-of-sale (neutral — already settled)
     final Map<String, Map<String, dynamic>> agg = {};
-    for (final bill in (billRes as List)) {
-      final name = bill['customer_name']?.toString().trim() ?? '';
+    for (final bill in billList) {
+      final name = bill.customerName?.trim() ?? '';
       if (name.isEmpty) continue;
       final key = name.toLowerCase();
       agg.putIfAbsent(
           key, () => {'credit': 0.0, 'paid': 0.0, 'lastDate': null});
-      final amt = (bill['total_amount'] as num?)?.toDouble() ?? 0;
-      final txType = bill['transaction_type']?.toString();
-      final resolvedType = (txType != null && txType.isNotEmpty)
-          ? txType
-          : (bill['is_credit'] == true ? 'credit' : 'sale');
-      final nagad = (bill['nagad_amount'] as num?)?.toDouble() ?? 0;
+      final amt = bill.totalAmount;
+      final resolvedType = bill.transactionType;
+      final nagad = bill.nagadAmount;
       if (resolvedType == 'credit') {
         agg[key]!['credit'] = (agg[key]!['credit'] as double) + amt;
       } else if (resolvedType == 'split') {
@@ -361,9 +365,9 @@ class SupabaseService {
         agg[key]!['paid'] = (agg[key]!['paid'] as double) + amt;
       }
       // 'sale' is neutral — no outstanding impact.
-      final date = DateTime.tryParse(bill['created_at'] as String? ?? '');
+      final date = bill.createdAt;
       final existing = agg[key]!['lastDate'] as DateTime?;
-      if (date != null && (existing == null || date.isAfter(existing))) {
+      if (existing == null || date.isAfter(existing)) {
         agg[key]!['lastDate'] = date;
       }
     }

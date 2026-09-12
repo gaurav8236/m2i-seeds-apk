@@ -98,19 +98,28 @@ class _ReportsScreenState extends State<ReportsScreen>
     setState(() => _loading = true);
     try {
       final range = _rangeFor(_period);
+      // Perf (2026-09-13 diagnosis): fetch past_bills once and reuse it for
+      // both fetchTotalOutstanding() and fetchCustomers() below, instead of
+      // 3 independent full-history queries on every load — see
+      // supabase_service.dart's notes on those two functions. Doesn't bound
+      // the history itself (would risk undercounting khata), just removes
+      // the redundant duplicate fetches.
       final results = await Future.wait([
         SupabaseService.fetchFilteredStats(from: range.start, to: range.end),
-        SupabaseService.fetchTotalOutstanding(),
-        SupabaseService.fetchCustomers(),
         SupabaseService.fetchPastBills(),
       ]);
       final stats = results[0] as Map<String, double>;
+      final bills = results[1] as List<Bill>;
+      final outstandingAndCustomers = await Future.wait([
+        SupabaseService.fetchTotalOutstanding(bills: bills),
+        SupabaseService.fetchCustomers(bills: bills),
+      ]);
       setState(() {
         _credit = stats['credit'] ?? 0;
         _paid = stats['paid'] ?? 0;
-        _outstanding = results[1] as double;
-        _customers = results[2] as List<Customer>;
-        _allBills = results[3] as List<Bill>;
+        _outstanding = outstandingAndCustomers[0] as double;
+        _customers = outstandingAndCustomers[1] as List<Customer>;
+        _allBills = bills;
       });
     } catch (e) {
       _showSnack('लोड नहीं हो सका: $e');

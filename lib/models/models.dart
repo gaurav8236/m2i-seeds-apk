@@ -99,6 +99,7 @@ class Bill {
   final bool isCredit;
   // 'sale' | 'credit' | 'payment' — falls back to is_credit for old rows.
   final String transactionType;
+  final double nagadAmount;
   final List<Map<String, dynamic>> billDetails;
 
   Bill({
@@ -109,6 +110,7 @@ class Bill {
     this.discountAmount,
     required this.isCredit,
     required this.transactionType,
+    this.nagadAmount = 0,
     required this.billDetails,
   });
 
@@ -127,6 +129,7 @@ class Bill {
       transactionType: (txType != null && txType.isNotEmpty)
           ? txType
           : (isCredit ? 'credit' : 'sale'),
+      nagadAmount: (map['nagad_amount'] as num?)?.toDouble() ?? 0,
       billDetails: () {
         final raw = map['bill_details'];
         if (raw is String) {
