@@ -63,24 +63,22 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _loading = true);
     try {
       final range = _rangeFor(_period);
-      // Perf (2026-09-13 diagnosis): fetch past_bills once here and reuse it
-      // for fetchTotalOutstanding() below, instead of each independently
-      // re-querying the shop's full bill history — see
-      // supabase_service.dart's fetchTotalOutstanding() note. This does not
-      // bound the history itself (that would risk undercounting khata), it
-      // just removes the redundant duplicate fetch.
+      // Perf (Sprint 7, P2-c): fetchTotalOutstanding() now reads
+      // customers.running_balance directly (O(customer count)) instead of
+      // walking past_bills, so it no longer needs to wait on
+      // fetchPastBills() — folded into the same parallel Future.wait.
       final results = await Future.wait([
         SupabaseService.fetchFilteredStats(from: range.start, to: range.end),
         SupabaseService.fetchStock(),
         SupabaseService.fetchPastBills(),
         AuthService.fetchProfile(),
+        SupabaseService.fetchTotalOutstanding(),
       ]);
       final stats = results[0] as Map<String, double>;
       final stock = results[1] as List<StockItem>;
       final bills = results[2] as List<Bill>;
       final profile = results[3] as Map<String, String?>;
-      final outstanding =
-          await SupabaseService.fetchTotalOutstanding(bills: bills);
+      final outstanding = results[4] as double;
       setState(() {
         _credit = stats['credit'] ?? 0;
         _paid = stats['paid'] ?? 0;

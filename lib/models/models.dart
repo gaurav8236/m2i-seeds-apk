@@ -171,8 +171,16 @@ class Customer {
   final String name;
   final String? phone;
   final double openingBalance;
+  // Perf (Sprint 7, P2-c): server-maintained running balance — pure
+  // bill-driven delta (credit/split/payment/deposit effects), kept
+  // separate from openingBalance so editing one never requires touching
+  // the other. outstanding = openingBalance + runningBalance.
+  final double runningBalance;
   final DateTime createdAt;
-  // Computed from past_bills after fetch:
+  // outstanding is still computed post-fetch (openingBalance +
+  // runningBalance, with per-caller clamping — see
+  // SupabaseService.fetchTotalOutstanding/fetchCustomers), but no longer
+  // requires walking past_bills to get there.
   double outstanding;
   DateTime? lastPurchaseAt;
 
@@ -181,6 +189,7 @@ class Customer {
     required this.name,
     this.phone,
     required this.openingBalance,
+    this.runningBalance = 0,
     required this.createdAt,
     this.outstanding = 0,
     this.lastPurchaseAt,
@@ -192,8 +201,14 @@ class Customer {
       name: map['name']?.toString() ?? '',
       phone: map['phone']?.toString(),
       openingBalance: (map['opening_balance'] as num?)?.toDouble() ?? 0,
+      runningBalance: (map['running_balance'] as num?)?.toDouble() ?? 0,
       // .toLocal() for consistent IST display (#7).
       createdAt: DateTime.tryParse(map['created_at'] ?? '')?.toLocal() ?? DateTime.now(),
+      // last_bill_at is server-maintained (Sprint 7) — no longer derived
+      // from a past_bills walk.
+      lastPurchaseAt: map['last_bill_at'] != null
+          ? DateTime.tryParse(map['last_bill_at'].toString())?.toLocal()
+          : null,
     );
   }
 }

@@ -7,6 +7,22 @@ import 'auth_service.dart';
 
 enum StatsPeriod { today, thisWeek, thisMonth, custom }
 
+// Bug fix (Sprint 7): /voice-checkout/ can return HTTP 200 with
+// {"status": "partial", "oversold": [...]}  when an item's requested
+// quantity exceeds what's actually in stock — nothing was saved in that
+// case (see checkout_and_apply_balance() in
+// mobile/migrations/sprint7_002_checkout_rpc.sql). Before this fix,
+// callers only checked response.statusCode != 200, so a partial/oversold
+// response looked like a full success to the shopkeeper. This exception
+// carries the oversold detail so the UI can show it.
+class CheckoutOversoldException implements Exception {
+  final String message;
+  final List<Map<String, dynamic>> oversold;
+  CheckoutOversoldException(this.message, this.oversold);
+  @override
+  String toString() => message;
+}
+
 class SupabaseService {
   static final _client = Supabase.instance.client;
 
@@ -158,6 +174,34 @@ class SupabaseService {
 
   // ── Checkout ───────────────────────────────────────────────────────────────
 
+  // Shared response handling for every /voice-checkout/ caller (checkout,
+  // recordPayment, recordDeposit). Bug fix (Sprint 7): the endpoint returns
+  // HTTP 200 even for {"status": "partial", ...} (oversold, nothing saved)
+  // — checking only statusCode silently treated that as success.
+  static void _checkCheckoutResponse(http.Response response, String failureLabel) {
+    if (response.statusCode != 200) {
+      throw Exception('$failureLabel: ${response.statusCode}');
+    }
+    Map<String, dynamic> body;
+    try {
+      body = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      // Unparseable body on a 200 — treat as success rather than block the
+      // user on a response-shape issue unrelated to whether the write happened.
+      return;
+    }
+    if (body['status'] == 'partial') {
+      final oversold = (body['oversold'] as List?)
+              ?.map((e) => Map<String, dynamic>.from(e as Map))
+              .toList() ??
+          [];
+      throw CheckoutOversoldException(
+        body['message']?.toString() ?? '$failureLabel: कुछ सामान का स्टॉक पर्याप्त नहीं था',
+        oversold,
+      );
+    }
+  }
+
   static Future<void> checkout({
     required List<Map<String, dynamic>> items,
     required double totalAmount,
@@ -190,9 +234,7 @@ class SupabaseService {
       }),
     );
 
-    if (response.statusCode != 200) {
-      throw Exception('Checkout failed: ${response.statusCode}');
-    }
+    _checkCheckoutResponse(response, 'Checkout failed');
   }
 
   // ── Stats ──────────────────────────────────────────────────────────────────
@@ -245,86 +287,44 @@ class SupabaseService {
   }
 
   // Total unpaid उधार across ALL customers — not period-filtered.
-  // Includes customers.opening_balance so customers with pre-existing debt but
-  // no bills are counted correctly on the dashboard KPI.
   //
-  // Uses per-customer clamping (not a single aggregate clamp) so that an
-  // overpayment by Customer A never cancels Customer B's outstanding (#48).
-  //
-  // Perf note (2026-09-13 diagnosis): pass `bills` when the caller already
-  // has a fresh full-history fetch (e.g. Home/Reports load both this and
-  // fetchPastBills() together) so this doesn't issue its own redundant
-  // past_bills query. Still walks ALL-TIME history either way — bounding
-  // *which* bills feed this calculation would risk undercounting a real
-  // khata balance, so only the redundant fetch is removed here, not the
-  // all-time scope. Omit `bills` to fetch independently (back-compat for
-  // any other caller).
-  static Future<double> fetchTotalOutstanding({List<Bill>? bills}) async {
+  // Perf (Sprint 7, P2-c): previously walked a shop's ENTIRE past_bills
+  // history on every call (O(bill count), even after the 2026-09-13 dedupe
+  // that removed the redundant duplicate fetch but not the underlying
+  // per-load cost). Now reads the server-maintained running_balance column
+  // directly — O(customer count) — see
+  // mobile/migrations/sprint7_001_customer_running_balance.sql and
+  // sprint7_002_checkout_rpc.sql (which keeps running_balance current on
+  // every checkout). Uses per-customer clamping (not a single aggregate
+  // clamp) so that an overpayment by Customer A never cancels Customer B's
+  // outstanding (#48) — same semantics as before, just computed server-side
+  // incrementally instead of client-side from scratch each load.
+  static Future<double> fetchTotalOutstanding() async {
     final userId = _userId;
     if (userId == null) return 0;
 
-    // Aggregate credits and payments per customer name (case-insensitive key).
-    final Map<String, double> perCust = {};
+    final custRes = await _client
+        .from('customers')
+        .select('opening_balance, running_balance')
+        .eq('user_id', userId);
 
-    // Bills — primary source, must succeed.
-    final List<Bill> billList = bills ??
-        await fetchPastBills().then(
-          (all) => all.where((b) => (b.customerName ?? '').isNotEmpty).toList(),
-        );
-    for (final bill in billList) {
-      final custName = bill.customerName?.trim() ?? '';
-      if (custName.isEmpty) continue;
-      final key = custName.toLowerCase();
-      perCust.putIfAbsent(key, () => 0.0);
-      final amount = bill.totalAmount;
-      final resolvedType = bill.transactionType;
-      final nagad = bill.nagadAmount;
-      if (resolvedType == 'credit') {
-        perCust[key] = perCust[key]! + amount;
-      } else if (resolvedType == 'split') {
-        perCust[key] =
-            perCust[key]! + (amount - nagad).clamp(0, double.infinity);
-      } else if (resolvedType == 'payment' || resolvedType == 'deposit') {
-        // Only explicit payment receipts and deposits reduce outstanding.
-        // Cash sales ('sale' or pre-Sprint-3 NULL) have no outstanding impact.
-        perCust[key] = perCust[key]! - amount;
-      }
-      // 'sale' is settled at point-of-sale — neutral for outstanding.
+    double total = 0;
+    for (final c in (custRes as List)) {
+      final opening = (c['opening_balance'] as num?)?.toDouble() ?? 0;
+      final running = (c['running_balance'] as num?)?.toDouble() ?? 0;
+      total += (opening + running).clamp(0.0, double.infinity);
     }
-
-    // Opening balances — secondary; if this query fails, bills-only total is
-    // still valid and surfaced rather than crashing the dashboard KPI.
-    try {
-      final custRes = await _client
-          .from('customers')
-          .select('name, opening_balance')
-          .eq('user_id', userId);
-      for (final c in (custRes as List)) {
-        final custName = c['name']?.toString().trim() ?? '';
-        if (custName.isEmpty) continue;
-        final key = custName.toLowerCase();
-        perCust.putIfAbsent(key, () => 0.0);
-        perCust[key] =
-            perCust[key]! + ((c['opening_balance'] as num?)?.toDouble() ?? 0);
-      }
-    } catch (_) {
-      // Customers table unavailable (RLS / network) — bills total is still valid.
-    }
-
-    // Sum with per-customer clamp so Customer A's overpayment cannot reduce
-    // Customer B's outstanding in the KPI (#48).
-    return perCust.values
-        .fold<double>(0.0, (sum, v) => sum + v.clamp(0.0, double.infinity));
+    return total;
   }
 
   // ── Customers ──────────────────────────────────────────────────────────────
 
-  // Perf note (2026-09-13 diagnosis): pass `bills` when the caller already
-  // has a fresh full-history fetch (Home/Reports load both this and
-  // fetchPastBills() together) so this doesn't issue its own redundant
-  // past_bills query. Still walks ALL-TIME history either way — see
-  // fetchTotalOutstanding()'s note above, same reasoning applies here.
-  static Future<List<Customer>> fetchCustomers({List<Bill>? bills}) async {
+  // Perf (Sprint 7, P2-c): previously walked a shop's ENTIRE past_bills
+  // history to aggregate credit/paid per customer on every call — now reads
+  // running_balance directly (see fetchTotalOutstanding()'s note above).
+  // No per-customer clamp here — negative = customer has a credit balance
+  // (advance deposit / overpayment), matching pre-Sprint-7 semantics exactly.
+  static Future<List<Customer>> fetchCustomers() async {
     final userId = _userId;
     if (userId == null) return [];
 
@@ -334,56 +334,9 @@ class SupabaseService {
         .eq('user_id', userId)
         .order('name');
 
-    final List<Bill> billList = bills ??
-        await fetchPastBills().then(
-          (all) => all.where((b) => (b.customerName ?? '').isNotEmpty).toList(),
-        );
-
-    // Aggregate bill amounts + last activity date per customer name.
-    // Key is lowercased + trimmed — case-insensitive dedup (bug #58).
-    // Outstanding logic:
-    //   'credit'/'split' → customer owes money  (adds to outstanding)
-    //   'payment'/'deposit' → customer paid     (subtracts from outstanding)
-    //   'sale'    → cash at point-of-sale (neutral — already settled)
-    final Map<String, Map<String, dynamic>> agg = {};
-    for (final bill in billList) {
-      final name = bill.customerName?.trim() ?? '';
-      if (name.isEmpty) continue;
-      final key = name.toLowerCase();
-      agg.putIfAbsent(
-          key, () => {'credit': 0.0, 'paid': 0.0, 'lastDate': null});
-      final amt = bill.totalAmount;
-      final resolvedType = bill.transactionType;
-      final nagad = bill.nagadAmount;
-      if (resolvedType == 'credit') {
-        agg[key]!['credit'] = (agg[key]!['credit'] as double) + amt;
-      } else if (resolvedType == 'split') {
-        // Split bill: only (total - nagad) is still owed.
-        agg[key]!['credit'] = (agg[key]!['credit'] as double) +
-            (amt - nagad).clamp(0, double.infinity);
-      } else if (resolvedType == 'payment' || resolvedType == 'deposit') {
-        agg[key]!['paid'] = (agg[key]!['paid'] as double) + amt;
-      }
-      // 'sale' is neutral — no outstanding impact.
-      final date = bill.createdAt;
-      final existing = agg[key]!['lastDate'] as DateTime?;
-      if (existing == null || date.isAfter(existing)) {
-        agg[key]!['lastDate'] = date;
-      }
-    }
-
     final customers = (custRes as List).map((c) {
       final customer = Customer.fromMap(c);
-      final data = agg[customer.name.trim().toLowerCase()];
-      if (data != null) {
-        final credit = data['credit'] as double;
-        final paid = data['paid'] as double;
-        // Allow negative: customer has a credit balance (advance deposit / overpayment)
-        customer.outstanding = customer.openingBalance + credit - paid;
-        customer.lastPurchaseAt = data['lastDate'] as DateTime?;
-      } else {
-        customer.outstanding = customer.openingBalance;
-      }
+      customer.outstanding = customer.openingBalance + customer.runningBalance;
       return customer;
     }).toList();
 
@@ -539,9 +492,7 @@ class SupabaseService {
       }),
     );
 
-    if (response.statusCode != 200) {
-      throw Exception('Payment failed: ${response.statusCode}');
-    }
+    _checkCheckoutResponse(response, 'Payment failed');
   }
 
   // Record an advance deposit — customer pays in ahead of any bill.
@@ -581,9 +532,7 @@ class SupabaseService {
       }),
     );
 
-    if (response.statusCode != 200) {
-      throw Exception('Deposit failed: ${response.statusCode}');
-    }
+    _checkCheckoutResponse(response, 'Deposit failed');
   }
 
   // ── Stock History ───────────────────────────────────────────────────────────
