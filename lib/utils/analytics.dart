@@ -123,6 +123,8 @@ class Analytics {
   static void billPdfShared() => _track('bill_pdf_shared');
   static void billDraftSaved() => _track('bill_draft_saved');
   static void billDraftResumed() => _track('bill_draft_resumed');
+  static void billCancelled({required int itemCount}) =>
+      _track('bill_cancelled', (e) => e..putInt('item_count', itemCount));
 
   // ── Inventory ─────────────────────────────────────────────────────
 

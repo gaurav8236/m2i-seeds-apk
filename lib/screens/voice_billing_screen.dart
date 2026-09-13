@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
+import '../design_system/components/confirm_dialog.dart';
 import '../models/models.dart';
 import '../services/auth_service.dart';
 import '../services/draft_service.dart';
@@ -333,6 +334,28 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
     });
   }
 
+  Future<void> _cancelBill() async {
+    if (_billItems.isEmpty) return;
+    final confirmed = await AppDialogs.confirm(
+      context,
+      title: 'बिल रद्द करें?',
+      message: 'इस बिल की सभी आइटम हट जाएँगी। यह वापस नहीं हो सकता।',
+      confirmLabel: 'हाँ, रद्द करें',
+      cancelLabel: 'नहीं',
+      isDangerous: true,
+    );
+    if (!confirmed) return;
+    Analytics.billCancelled(itemCount: _billItems.length);
+    await DraftService.deleteDraft(_currentDraftId);
+    final drafts = await DraftService.loadDrafts();
+    if (!mounted) return;
+    _resetBill();
+    setState(() {
+      _currentDraftId = DateTime.now().millisecondsSinceEpoch.toString();
+      _drafts = drafts;
+    });
+  }
+
   Future<void> _openRecordingScreen() async {
     Analytics.voiceSessionOpened();
     final results = await Navigator.push<List<BillItem>>(
@@ -494,25 +517,46 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                                       color: Colors.white70, fontSize: 10)),
                             ]),
                       ]),
-                      ElevatedButton.icon(
-                        onPressed: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const PastBillsScreen())),
-                        icon: const Icon(Icons.history, size: 14),
-                        label: const Text('पुराने बिल',
-                            style: TextStyle(
-                                fontWeight: FontWeight.w600, fontSize: 12)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: AppColors.primary,
-                          elevation: 0,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
+                      Row(children: [
+                        if (_billItems.isNotEmpty) ...[
+                          Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.3)),
+                            ),
+                            child: IconButton(
+                              onPressed: _cancelBill,
+                              icon: const Icon(Icons.close,
+                                  color: Colors.white, size: 18),
+                              tooltip: 'बिल रद्द करें',
+                              padding: const EdgeInsets.all(8),
+                              constraints: const BoxConstraints(),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        ElevatedButton.icon(
+                          onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const PastBillsScreen())),
+                          icon: const Icon(Icons.history, size: 14),
+                          label: const Text('पुराने बिल',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.w600, fontSize: 12)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: AppColors.primary,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                          ),
                         ),
-                      ),
+                      ]),
                     ],
                   ),
                   // Show total only when items exist
