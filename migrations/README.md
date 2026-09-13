@@ -50,10 +50,12 @@ read the new column/RPCs — all three depend on this schema existing first.
 | 002 | `sprint7_002_checkout_rpc.sql` | 🔴 High | 001 applied — writes to `running_balance`/`last_bill_at` |
 | 003 | `sprint7_003_past_bills_created_at_index.sql` | 🟢 Low | None — independent of 001/002. **Run this one alone** — `CREATE INDEX CONCURRENTLY` cannot be inside a multi-statement transaction block with anything else. |
 | 004 | `sprint7_004_admin_bill_aggregates_rpc.sql` | 🟢 Low | 003 applied (so the aggregate query is index-backed from the start) |
+| 005 | `sprint7_005_widen_transaction_type_check.sql` | 🟢 Low | None — independent of 001-004. Fixes a **live bug** (BUG-4): split/deposit bills have never been able to save. |
 
 ## Safe to run now
 - **003** — pure index add, zero data/behavior risk, run anytime.
 - **004** — read-only aggregate function, zero data risk. Run after 003.
+- **005** — widens a CHECK constraint only, no data rewrite, run anytime. Should land before/with the `backend/` push since it unblocks split/deposit bills that code already tries to write.
 
 ## Needs care
 - **001** — run the pre-check first (0 duplicate-name groups expected — should already hold from
