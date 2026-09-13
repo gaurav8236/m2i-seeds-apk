@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:logrocket_flutter/logrocket_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
+import 'l10n/generated/app_localizations.dart';
 import 'screens/login_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'services/auth_service.dart';
+import 'services/locale_service.dart';
 import 'supabase_config.dart';
 import 'theme.dart';
 import 'utils/analytics.dart';
@@ -31,8 +34,42 @@ void main() async {
   );
 }
 
-class SmartDukanApp extends StatelessWidget {
+class SmartDukanApp extends StatefulWidget {
   const SmartDukanApp({super.key});
+
+  /// Lets any descendant (the design system's `LanguageSwitcher`) change
+  /// the app's language at runtime. The standard Flutter pattern for
+  /// runtime locale switching without a state-management package —
+  /// consistent with this codebase's plain StatefulWidget/setState
+  /// convention (see `mobile-developer`'s agent notes).
+  static void setLocale(BuildContext context, Locale locale) {
+    context.findAncestorStateOfType<_SmartDukanAppState>()?._setLocale(locale);
+  }
+
+  @override
+  State<SmartDukanApp> createState() => _SmartDukanAppState();
+}
+
+class _SmartDukanAppState extends State<SmartDukanApp> {
+  // Defaults to Hindi, not the device locale — matches the app's existing
+  // Hindi-first hardcoded UI until a shopkeeper explicitly picks English.
+  Locale _locale = const Locale('hi');
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreSavedLocale();
+  }
+
+  Future<void> _restoreSavedLocale() async {
+    final saved = await LocaleService.loadSavedLocale();
+    if (saved != null && mounted) setState(() => _locale = saved);
+  }
+
+  void _setLocale(Locale locale) {
+    setState(() => _locale = locale);
+    LocaleService.saveLocale(locale);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -41,6 +78,14 @@ class SmartDukanApp extends StatelessWidget {
         title: 'SmartDukan',
         debugShowCheckedModeBanner: false,
         theme: appTheme,
+        locale: _locale,
+        supportedLocales: LocaleService.supportedLocales,
+        localizationsDelegates: const [
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
         navigatorObservers: [LogRocketNavigatorObserver('smartdukan')],
         home: const AuthGate(),
       ),

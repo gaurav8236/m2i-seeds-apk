@@ -1,0 +1,23 @@
+{
+  "@@locale": "hi",
+
+  "commonCancel": "रद्द करें",
+  "commonConfirm": "पुष्टि करें",
+  "commonOk": "ठीक है",
+  "commonRetry": "फिर से कोशिश करें",
+  "commonLoading": "लोड हो रहा है...",
+
+  "voiceInputTapToSpeak": "बोलने के लिए दबाएं",
+  "voiceInputListening": "सुन रहा हूँ...",
+  "voiceInputProcessing": "प्रोसेस हो रहा है...",
+
+  "languageSwitchLabel": "भाषा",
+  "languageEnglish": "अंग्रेज़ी",
+  "languageHindi": "हिंदी",
+
+  "feedbackSuccessDefault": "हो गया",
+  "feedbackErrorDefault": "कुछ गड़बड़ हो गई",
+
+  "emptyStateDefaultMessage": "अभी यहाँ कुछ नहीं है",
+  "emptyStateRetryAction": "फिर कोशिश करें"
+}

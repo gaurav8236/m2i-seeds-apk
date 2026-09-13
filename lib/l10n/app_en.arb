@@ -1,0 +1,38 @@
+{
+  "@@locale": "en",
+
+  "commonCancel": "Cancel",
+  "@commonCancel": { "description": "Cancel action, used in confirm dialogs." },
+  "commonConfirm": "Confirm",
+  "@commonConfirm": { "description": "Confirm action, used in confirm dialogs." },
+  "commonOk": "OK",
+  "@commonOk": { "description": "Acknowledgement action for info-only dialogs." },
+  "commonRetry": "Retry",
+  "@commonRetry": { "description": "Retry action after a failure." },
+  "commonLoading": "Loading...",
+  "@commonLoading": { "description": "Generic loading indicator caption." },
+
+  "voiceInputTapToSpeak": "Tap to speak",
+  "@voiceInputTapToSpeak": { "description": "VoiceInputButton label in the idle state." },
+  "voiceInputListening": "Listening...",
+  "@voiceInputListening": { "description": "VoiceInputButton label while actively recording." },
+  "voiceInputProcessing": "Working on it...",
+  "@voiceInputProcessing": { "description": "VoiceInputButton label while transcription/extraction is running." },
+
+  "languageSwitchLabel": "Language",
+  "@languageSwitchLabel": { "description": "Section/accessibility label for the language switcher." },
+  "languageEnglish": "English",
+  "@languageEnglish": { "description": "English option in the language switcher." },
+  "languageHindi": "Hindi",
+  "@languageHindi": { "description": "Hindi option in the language switcher, shown in Hindi script (see app_hi.arb) or English name depending on active locale." },
+
+  "feedbackSuccessDefault": "Done",
+  "@feedbackSuccessDefault": { "description": "Fallback AppFeedback.success message when the caller doesn't pass one." },
+  "feedbackErrorDefault": "Something went wrong",
+  "@feedbackErrorDefault": { "description": "Fallback AppFeedback.error message when the caller doesn't pass one." },
+
+  "emptyStateDefaultMessage": "Nothing here yet",
+  "@emptyStateDefaultMessage": { "description": "Fallback EmptyState message when the caller doesn't pass one." },
+  "emptyStateRetryAction": "Try again",
+  "@emptyStateRetryAction": { "description": "Fallback EmptyState action label when the caller doesn't pass one." }
+}
