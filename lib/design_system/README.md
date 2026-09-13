@@ -56,6 +56,28 @@ see `lib/l10n/README.md`. Get them via
 end-to-end (English + Hindi seeded); it does **not** cover the 11 existing
 screens' hardcoded strings, which are untouched by this task.
 
+## Previewing on a device/emulator
+`lib/main_design_preview.dart` is a standalone entrypoint that renders
+every component in this system without needing Supabase/LogRocket/auth —
+useful for visually checking a change before wiring it into a real
+screen:
+```
+flutter run -t lib/main_design_preview.dart
+# or force a starting language for a screenshot/check:
+flutter run -t lib/main_design_preview.dart --dart-define=PREVIEW_LOCALE=en
+```
+Its `LanguageSwitcher` is a no-op in this harness by design — that
+component targets `SmartDukanApp`'s real state (`lib/main.dart`) via
+`context.findAncestorStateOfType`, which doesn't exist in this standalone
+tree. Verified working (English/Hindi both render correctly on-device,
+`AppDialogs.confirm`, the voice button's state/animation, and the
+feedback snackbar all confirmed live on a Pixel 8 emulator, API 30) —
+only the tap-driven `SmartDukanApp.setLocale` path itself relies on
+Flutter's standard runtime-locale-switch pattern and hasn't been
+independently exercised end-to-end (would require a real screen using
+`LanguageSwitcher`, which doesn't exist yet per this task's foundation-only
+scope).
+
 ## Why some components are stateless
 `AppButton`, `QuantityStepper`, `LanguageSwitcher`, `EmptyState`,
 `StatusBadge` are all prop-driven/controlled (value or state owned by the
