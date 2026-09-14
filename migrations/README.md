@@ -76,3 +76,32 @@ then the `mobile/` changes (`fetchTotalOutstanding`/`fetchCustomers` now read `r
 directly instead of walking bill history) and `admin/` changes (`dashboard`/`users` pages now
 call `admin_bill_aggregates` instead of aggregating in JS) — see
 `.claude/records/DECISIONS.md` D3 and the plan file for the full sequencing.
+
+---
+
+# Sprint 8 — Checkout money-value validation (P1 money-safety fix)
+
+Fixes a gap found in the 2026-09-13 customer-ledger design review (see `.claude/TODOS.md`,
+Backend section, top item, and `.claude/qa/BUGS.md` BUG-14): `checkout_and_apply_balance()`
+validated stock sufficiency only, never the sign/magnitude of the money fields it was passed —
+a negative `p_total_amount` on a `credit`/`split` checkout could silently reduce a real
+customer's `running_balance` with no bill, no payment, and no trace.
+
+| # | File | Risk | Prerequisite |
+|---|---|---|---|
+| 001 | `sprint8_001_checkout_amount_guard.sql` | 🟡 Medium | `sprint7_002` already live (this `CREATE OR REPLACE`s the same function, adding one guard clause — it is not a from-scratch create) |
+
+**Status: written, NOT YET applied to the live Supabase project** — needs explicit user
+go-ahead immediately before running, per this project's standing rule on live migrations.
+`sprint8_001`'s own header comment documents why this is a new `sprint8` series rather than
+`sprint7_006`, the exact grant-preservation reasoning for using `CREATE OR REPLACE` here, and
+manual smoke tests to run right after applying.
+
+## After applying
+No backend/mobile/admin code changes are required for this migration alone — it only makes an
+already-possible-but-previously-unrejected bad input return `{"status": "invalid", ...}` instead
+of silently corrupting `running_balance`. `backend/main.py`'s `/voice-checkout/` handler currently
+only branches on `status == "partial"` for the RPC's structured rejection path (per
+`.claude/qa/BUGS.md` BUG-14's Fix notes) — it should be extended to also recognize `"invalid"` and
+surface a clear error to the caller, but that is a Backend Developer follow-up, not part of this
+migration.

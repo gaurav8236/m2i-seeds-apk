@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/models.dart';
@@ -256,7 +257,7 @@ class SupabaseService {
 
     final res = await _client
         .from('past_bills')
-        .select('total_amount, is_credit, transaction_type')
+        .select('total_amount, is_credit, nagad_amount, transaction_type')
         .eq('user_id', userId)
         // Always compare in UTC — Supabase stores created_at in UTC.
         // Without .toUtc() a local DateTime (e.g. IST midnight) is sent as-is
@@ -268,9 +269,25 @@ class SupabaseService {
         // (SQL NOT IN silently drops NULLs because NULL NOT IN (...) = NULL).
         .or('transaction_type.is.null,transaction_type.not.in.(payment,deposit,cash_loan)');
 
+    return bucketFilteredStats(res as List);
+  }
+
+  // Pure bucketing logic extracted from fetchFilteredStats() (BUG-12) so it
+  // can be unit-tested without a Supabase mock — takes the raw rows already
+  // fetched from `past_bills` and returns the same {'credit', 'paid'} shape.
+  // Mirrors the split-bill decomposition _computeRunningBalances()/
+  // _totalCreditGiven/_totalReceived (reports_screen.dart) already do
+  // correctly on the per-customer screen (the BUG-7 fix): a split bill's
+  // nagad_amount (cash) portion counts toward 'paid', and its remaining
+  // (total_amount − nagad_amount) udhar portion counts toward 'credit' —
+  // instead of the previous behavior of dumping the split's FULL
+  // total_amount into 'paid' and never touching 'credit' at all.
+  @visibleForTesting
+  static Map<String, double> bucketFilteredStats(List<dynamic> res) {
     double credit = 0, paid = 0;
-    for (final bill in (res as List)) {
+    for (final bill in res) {
       final amount = (bill['total_amount'] as num?)?.toDouble() ?? 0;
+      final nagad = (bill['nagad_amount'] as num?)?.toDouble() ?? 0;
       // Resolve type — prefer transaction_type; fall back to is_credit for old rows.
       final txType = bill['transaction_type']?.toString();
       final resolvedType = (txType != null && txType.isNotEmpty)
@@ -278,6 +295,9 @@ class SupabaseService {
           : (bill['is_credit'] == true ? 'credit' : 'sale');
       if (resolvedType == 'credit') {
         credit += amount;
+      } else if (resolvedType == 'split') {
+        paid += nagad;
+        credit += (amount - nagad).clamp(0, double.infinity);
       } else {
         // 'sale' and 'payment' both represent cash received in the period.
         paid += amount;
@@ -457,12 +477,35 @@ class SupabaseService {
     }).toList();
   }
 
+  // Server-filtered bill history for a single customer — mirrors
+  // fetchCustomerLedger's .ilike('customer_name', ...) pattern above, but
+  // returns full Bill objects (like fetchPastBills()) for the "बिल इतिहास"
+  // list on the customer-detail screen. Replaces the old pattern of calling
+  // fetchPastBills() (whole shop, unfiltered) and filtering client-side.
+  static Future<List<Bill>> fetchCustomerBills(String customerName) async {
+    final userId = _userId;
+    if (userId == null) return [];
+
+    final res = await _client
+        .from('past_bills')
+        .select('*')
+        .eq('user_id', userId)
+        .ilike('customer_name', customerName.trim())
+        .order('created_at', ascending: false);
+
+    return (res as List).map((e) => Bill.fromMap(e)).toList();
+  }
+
   static Future<void> recordPayment({
     required String customerName,
     required double amount,
   }) async {
     final userId = _userId;
     if (userId == null) throw Exception('Not authenticated');
+
+    if (customerName.trim().isNotEmpty) {
+      await ensureCustomerExists(customerName);
+    }
 
     final response = await http.post(
       Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-checkout/'),
@@ -504,6 +547,10 @@ class SupabaseService {
   }) async {
     final userId = _userId;
     if (userId == null) throw Exception('Not authenticated');
+
+    if (customerName.trim().isNotEmpty) {
+      await ensureCustomerExists(customerName);
+    }
 
     final response = await http.post(
       Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-checkout/'),

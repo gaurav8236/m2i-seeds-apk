@@ -203,6 +203,7 @@ class _BillDetailSheetState extends State<_BillDetailSheet> {
       final discount = bill.discountAmount ?? 0;
       final subTotal = bill.totalAmount + discount;
       final bytes = await buildBillPdfBytes(
+        context: context,
         items: items,
         customerName: bill.customerName ?? '',
         isCredit: bill.isCredit,

@@ -8,6 +8,55 @@ import '../utils/validators.dart';
 import '../widgets/bill_card.dart';
 import 'add_customer_screen.dart';
 
+// BUG-13: transaction types that are debt collection / advance / loan money,
+// not sales revenue — must not contribute to the "नकद बिक्री" / "उधार बिक्री"
+// / "कुल बिक्री" summary cards on the Reports tab's 2nd sub-tab. Mirrors the
+// exclusion list SupabaseService.fetchFilteredStats() already applies at the
+// query level. Deliberately does NOT change how a `split` bill is classified
+// here (still whole-amount into उधार बिक्री) — that half is an open
+// product-policy question (`.claude/TODOS.md`), not part of this fix.
+const _nonSaleTransactionTypes = {'payment', 'deposit', 'cash_loan'};
+
+// Pure summary result for the Reports tab's 3 sales-summary cards. Extracted
+// out of `_ReportsScreenState._reportsTab()` (BUG-13) so it can be
+// unit-tested without a live Supabase call/mock — mirrors the seam
+// SupabaseService.bucketFilteredStats() added for BUG-12.
+@visibleForTesting
+class ReportsSalesSummary {
+  final double cashTotal;
+  final double creditTotal;
+  final int cashCount;
+  final int creditCount;
+  final int salesCount;
+  const ReportsSalesSummary({
+    required this.cashTotal,
+    required this.creditTotal,
+    required this.cashCount,
+    required this.creditCount,
+    required this.salesCount,
+  });
+}
+
+// Partitions `bills` (already period/type-filtered by the caller) into
+// cash/credit sales totals, excluding payment/deposit/cash_loan rows from
+// all three summary numbers (BUG-13) — the bill list rendered below the
+// cards is untouched by this function; it keeps showing every filtered bill.
+@visibleForTesting
+ReportsSalesSummary computeReportsSalesSummary(List<Bill> bills) {
+  final salesBills = bills
+      .where((b) => !_nonSaleTransactionTypes.contains(b.transactionType))
+      .toList();
+  final creditBills = salesBills.where((b) => b.isCredit).toList();
+  final cashBills = salesBills.where((b) => !b.isCredit).toList();
+  return ReportsSalesSummary(
+    cashTotal: cashBills.fold(0.0, (s, b) => s + b.totalAmount),
+    creditTotal: creditBills.fold(0.0, (s, b) => s + b.totalAmount),
+    cashCount: cashBills.length,
+    creditCount: creditBills.length,
+    salesCount: salesBills.length,
+  );
+}
+
 class ReportsScreen extends StatefulWidget {
   final void Function(VoidCallback) onRegisterReload;
   const ReportsScreen({super.key, required this.onRegisterReload});
@@ -590,10 +639,12 @@ class _ReportsScreenState extends State<ReportsScreen>
   Widget _reportsTab() {
     if (_loading) return const Center(child: CircularProgressIndicator());
     final bills = _filteredBills;
-    final creditBills = bills.where((b) => b.isCredit).toList();
-    final cashBills = bills.where((b) => !b.isCredit).toList();
-    final creditTotal = creditBills.fold(0.0, (s, b) => s + b.totalAmount);
-    final cashTotal = cashBills.fold(0.0, (s, b) => s + b.totalAmount);
+    // Summary cards exclude payment/deposit/cash_loan rows (BUG-13); the
+    // bill list rendered below the cards keeps showing every filtered bill,
+    // including these types — this fix is scoped to the summary numbers only.
+    final summary = computeReportsSalesSummary(bills);
+    final creditTotal = summary.creditTotal;
+    final cashTotal = summary.cashTotal;
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -605,7 +656,7 @@ class _ReportsScreenState extends State<ReportsScreen>
                 child: _summaryCard(
                     'नकद बिक्री',
                     cashTotal,
-                    cashBills.length,
+                    summary.cashCount,
                     AppColors.success,
                     AppColors.successLight,
                     Icons.payments_outlined)),
@@ -614,7 +665,7 @@ class _ReportsScreenState extends State<ReportsScreen>
                 child: _summaryCard(
                     'उधार बिक्री',
                     creditTotal,
-                    creditBills.length,
+                    summary.creditCount,
                     AppColors.danger,
                     AppColors.dangerLight,
                     Icons.credit_card_outlined)),
@@ -623,7 +674,7 @@ class _ReportsScreenState extends State<ReportsScreen>
           _summaryCard(
               'कुल बिक्री',
               cashTotal + creditTotal,
-              bills.length,
+              summary.salesCount,
               AppColors.primary,
               AppColors.primaryLight,
               Icons.receipt_long_outlined,
@@ -735,10 +786,54 @@ class _ReportsScreenState extends State<ReportsScreen>
 
 class _CustomerDetailScreen extends StatefulWidget {
   final Customer customer;
-  const _CustomerDetailScreen({required this.customer});
+  // BUG-11 test-only injection seams: _showAddEntryDialog()/_showEditDialog()
+  // call these instead of the real SupabaseService network/Supabase calls
+  // when non-null, so a widget test can drive both dialogs through their
+  // full success + Navigator.pop + dispose sequence deterministically,
+  // without a real network call succeeding or failing unpredictably. Mirrors
+  // VoiceBillingScreen.initialStockForTest's seam pattern (BUG-5b). Use the
+  // @visibleForTesting factory below rather than this private constructor
+  // directly from test code.
+  final Future<void> Function({required String customerName, required double amount})?
+      recordPaymentForTest;
+  final Future<void> Function({required String customerName, required double amount})?
+      recordDepositForTest;
+  final Future<void> Function({required String id, String? phone, double? openingBalance})?
+      updateCustomerForTest;
+
+  const _CustomerDetailScreen({
+    required this.customer,
+    this.recordPaymentForTest,
+    this.recordDepositForTest,
+    this.updateCustomerForTest,
+  });
 
   @override
   State<_CustomerDetailScreen> createState() => _CustomerDetailScreenState();
+}
+
+// BUG-11 confirmation-test seam: `_CustomerDetailScreen` is library-private
+// (only reachable in production via `_ReportsScreenState._openCustomerDetail`,
+// which requires a live Supabase customer list) — this public, @visibleForTesting
+// factory lets a widget test build one directly with the injection points
+// above, so `_showAddEntryDialog()`/`_showEditDialog()` can be driven through
+// their full success/close path without a real Supabase/network call.
+@visibleForTesting
+Widget customerDetailScreenForTest({
+  required Customer customer,
+  Future<void> Function({required String customerName, required double amount})?
+      recordPayment,
+  Future<void> Function({required String customerName, required double amount})?
+      recordDeposit,
+  Future<void> Function({required String id, String? phone, double? openingBalance})?
+      updateCustomer,
+}) {
+  return _CustomerDetailScreen(
+    customer: customer,
+    recordPaymentForTest: recordPayment,
+    recordDepositForTest: recordDeposit,
+    updateCustomerForTest: updateCustomer,
+  );
 }
 
 class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
@@ -746,9 +841,23 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
   List<Map<String, dynamic>> _ledger = []; // ascending order (oldest → newest)
   List<double> _runningBalances = []; // running balance AFTER each entry
   List<Bill> _customerBills = [];
-  final _payCtrl = TextEditingController();
-  bool _paying = false;
   late Customer _customer;
+
+  // BUG-11 fix: these three controllers are State fields, created once and
+  // disposed only in this State's own dispose() below — never per dialog
+  // open/close. Two earlier candidate fixes (unfocus-before-pop, and
+  // deferring dispose() by a single addPostFrameCallback frame) were each
+  // confirmed, by `test/reports_screen_customer_dialog_test.dart`, to still
+  // leave the controller disposed while its TextField's AnimatedState was
+  // mid-closing-transition (the exact BUG-5b mechanism) — a single frame
+  // doesn't span a dialog's whole ~150-200ms closing animation. Keeping the
+  // controller alive for the screen's entire lifetime removes the race
+  // instead of trying to time around it. `_showAddEntryDialog()` clears
+  // `_amtCtrl` before reuse; `_showEditDialog()` reseeds `_phoneCtrl`/
+  // `_balCtrl` from the current `_customer` before reuse.
+  final TextEditingController _amtCtrl = TextEditingController();
+  final TextEditingController _phoneCtrl = TextEditingController();
+  final TextEditingController _balCtrl = TextEditingController();
 
   @override
   void initState() {
@@ -757,23 +866,27 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _amtCtrl.dispose();
+    _phoneCtrl.dispose();
+    _balCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     if (mounted) setState(() => _loading = true);
     try {
       final results = await Future.wait([
         SupabaseService.fetchCustomerLedger(_customer.name),
-        SupabaseService.fetchPastBills(),
+        SupabaseService.fetchCustomerBills(_customer.name),
       ]);
       final ledger = results[0] as List<Map<String, dynamic>>;
-      final allBills = results[1] as List<Bill>;
-      // Case-insensitive comparison so "Mayank"/"mayank" bills both appear (#58).
-      final nameLower = _customer.name.trim().toLowerCase();
+      final customerBills = results[1] as List<Bill>;
       if (mounted)
         setState(() {
           _ledger = ledger;
-          _customerBills = allBills
-              .where((b) => b.customerName?.trim().toLowerCase() == nameLower)
-              .toList();
+          _customerBills = customerBills;
           _computeRunningBalances();
         });
     } catch (e) {
@@ -819,7 +932,14 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
       ? _customer.openingBalance
       : _runningBalances.last;
 
-  double get _totalCreditGiven => _ledger.fold<double>(0, (s, e) {
+  // Tile 1 — "कुल उधार": all-time debt total, including the opening balance
+  // (when it's a debt, i.e. positive) plus credit entries plus the udhar
+  // portion of split entries. Deliberately excludes plain cash sales — money
+  // that was never owed in the first place (BUSINESS_RULES.md's rule against
+  // mixing sales and ledger figures).
+  double get _totalCreditGiven =>
+      (_customer.openingBalance > 0 ? _customer.openingBalance : 0) +
+      _ledger.fold<double>(0, (s, e) {
         final type = e['type'] as String? ?? '';
         final amt = (e['amount'] as num?)?.toDouble() ?? 0;
         final nagad = (e['nagad_amount'] as num?)?.toDouble() ?? 0;
@@ -828,15 +948,17 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
         return s;
       });
 
+  // Tile 2 — "चुकाया गया": actual debt repayments only — payment + deposit,
+  // and nothing else. BUG-7 fix: a split entry's nagad (cash) portion was
+  // never added to the debt balance in the first place (see
+  // _computeRunningBalances' split case below, which only adds the udhar
+  // portion) — so it can't be "repaid," exactly like a plain 'cash'/'sale'
+  // amount. Counting it here (the original plan's Part 3 formula) broke
+  // Tile1 − Tile2 == Tile3 reconciliation whenever a split entry existed.
   double get _totalReceived => _ledger.fold<double>(0, (s, e) {
         final type = e['type'] as String? ?? '';
         final amt = (e['amount'] as num?)?.toDouble() ?? 0;
-        final nagad = (e['nagad_amount'] as num?)?.toDouble() ?? 0;
-        if (type == 'payment' ||
-            type == 'deposit' ||
-            type == 'cash' ||
-            type == 'sale') return s + amt;
-        if (type == 'split') return s + nagad;
+        if (type == 'payment' || type == 'deposit') return s + amt;
         return s;
       });
 
@@ -848,37 +970,12 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
     return '₹${NumberFormat('#,##,##0', 'en_IN').format(n.round())}';
   }
 
-  Future<void> _recordPayment() async {
-    final amtErr = Validators.paymentAmount(_payCtrl.text);
-    if (amtErr != null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(amtErr)));
-      return;
-    }
-    final amt = double.parse(_payCtrl.text.trim());
-    setState(() => _paying = true);
-    try {
-      await SupabaseService.recordPayment(
-          customerName: _customer.name, amount: amt);
-      if (mounted) _payCtrl.clear();
-      await _load();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('₹${amt.toStringAsFixed(0)} दर्ज किया')));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('दर्ज नहीं हो सका: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _paying = false);
-    }
-  }
-
   Future<void> _showAddEntryDialog() async {
     String entryType = 'payment';
-    final amtCtrl = TextEditingController();
+    // BUG-11 fix: reuse the State-level controller (never disposed per
+    // dialog) instead of creating+disposing a local one — see field comment.
+    final amtCtrl = _amtCtrl..clear();
+    final amtFormKey = GlobalKey<FormState>();
     // 'submitting' is declared OUTSIDE the StatefulBuilder so it is not
     // re-initialised to false whenever the payment/deposit chip toggle calls
     // setLocal() and rebuilds the closure (same fix applied to _showEditDialog).
@@ -891,43 +988,49 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
           return AlertDialog(
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: const Text('लेनदेन दर्ज करें',
+            title: const Text('लेन-देन का प्रकार चुनें',
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-            content: Column(mainAxisSize: MainAxisSize.min, children: [
-              _entryOption(
-                label: 'भुगतान मिला',
-                sub: 'ग्राहक ने बकाया चुकाया',
-                icon: Icons.arrow_downward,
-                value: 'payment',
-                selected: entryType,
-                color: AppColors.success,
-                bgColor: AppColors.successLight,
-                onTap: () => setLocal(() => entryType = 'payment'),
-              ),
-              const SizedBox(height: 8),
-              _entryOption(
-                label: 'अग्रिम जमा',
-                sub: 'ग्राहक ने पहले से पैसा दिया',
-                icon: Icons.savings_outlined,
-                value: 'deposit',
-                selected: entryType,
-                color: AppColors.advanceViolet,
-                bgColor: AppColors.advanceVioletLight,
-                onTap: () => setLocal(() => entryType = 'deposit'),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: amtCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                  prefixText: '₹  ',
-                  labelText: 'राशि',
-                  isDense: true,
-                  border: OutlineInputBorder(),
+            content: Form(
+              key: amtFormKey,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                _entryOption(
+                  label: 'भुगतान मिला',
+                  sub: 'ग्राहक ने बकाया चुकाया',
+                  icon: Icons.arrow_downward,
+                  value: 'payment',
+                  selected: entryType,
+                  color: AppColors.success,
+                  bgColor: AppColors.successLight,
+                  onTap: () => setLocal(() => entryType = 'payment'),
                 ),
-              ),
-            ]),
+                const SizedBox(height: 8),
+                _entryOption(
+                  label: 'अग्रिम जमा',
+                  sub: 'ग्राहक ने पहले से पैसा दिया',
+                  icon: Icons.savings_outlined,
+                  value: 'deposit',
+                  selected: entryType,
+                  color: AppColors.advanceViolet,
+                  bgColor: AppColors.advanceVioletLight,
+                  onTap: () => setLocal(() => entryType = 'deposit'),
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: amtCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    prefixText: '₹  ',
+                    labelText: 'राशि',
+                    hintText: 'जैसे: 500',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (v) => Validators.paymentAmount(v),
+                ),
+              ]),
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
@@ -940,26 +1043,45 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                 onPressed: submitting
                     ? null
                     : () async {
-                        final amt = double.tryParse(amtCtrl.text);
-                        if (amt == null || amt <= 0) return;
+                        if (!amtFormKey.currentState!.validate()) return;
+                        final amt = double.parse(amtCtrl.text.trim());
                         setLocal(() => submitting = true);
                         try {
                           if (entryType == 'payment') {
-                            await SupabaseService.recordPayment(
+                            final record = widget.recordPaymentForTest ??
+                                SupabaseService.recordPayment;
+                            await record(
                                 customerName: widget.customer.name,
                                 amount: amt);
                           } else {
-                            await SupabaseService.recordDeposit(
+                            final record = widget.recordDepositForTest ??
+                                SupabaseService.recordDeposit;
+                            await record(
                                 customerName: widget.customer.name,
                                 amount: amt);
                           }
+                          // BUG-11, hypothesis #2 (#1's frame-deferral alone did
+                          // not hold on retest): the amount field almost
+                          // certainly still has focus (active cursor-blink
+                          // animation) at the moment of submit — unfocus before
+                          // popping, matching BUG-5b's actual confirmed
+                          // mechanism (a focused field's AnimatedState colliding
+                          // with route teardown), not just a timing guess.
+                          if (ctx.mounted) FocusScope.of(ctx).unfocus();
                           if (ctx.mounted) Navigator.pop(ctx);
-                          await _load();
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                                content: Text(
-                                    '₹${amt.toStringAsFixed(0)} दर्ज किया')));
-                          }
+                          // BUG-11 candidate fix: defer the post-pop reload (and its
+                          // setState) past the dialog's closing transition instead of
+                          // awaiting it immediately after Navigator.pop — same class of
+                          // race as BUG-5b (a full-screen rebuild landing mid-transition
+                          // on a still-closing route), not yet reproduction-confirmed.
+                          WidgetsBinding.instance.addPostFrameCallback((_) async {
+                            await _load();
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                  content: Text(
+                                      '₹${amt.toStringAsFixed(0)} दर्ज किया')));
+                            }
+                          });
                         } catch (e) {
                           setLocal(() => submitting = false);
                           if (mounted) {
@@ -989,7 +1111,10 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
         },
       ),
     );
-    amtCtrl.dispose();
+    // BUG-11 fix: no per-dialog dispose() anymore — `_amtCtrl` is a
+    // State-level field, disposed only in this State's own dispose(). See
+    // the field's doc comment for why the earlier addPostFrameCallback-
+    // deferral approach was confirmed insufficient.
   }
 
   // ── C-05: Edit customer ────────────────────────────────────────────────────
@@ -998,9 +1123,11 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
     final hasBills = _ledger
         .any((e) => ['credit', 'cash', 'split'].contains(e['type'] as String?));
 
-    final phoneCtrl = TextEditingController(text: widget.customer.phone ?? '');
-    final balCtrl = TextEditingController(
-        text: widget.customer.openingBalance.abs().toStringAsFixed(0));
+    // BUG-11 fix: reuse the State-level controllers (never disposed per
+    // dialog) instead of creating+disposing local ones — see field comment.
+    final phoneCtrl = _phoneCtrl..text = widget.customer.phone ?? '';
+    final balCtrl = _balCtrl
+      ..text = widget.customer.openingBalance.abs().toStringAsFixed(0);
     // true = debt (positive), false = advance (negative)
     bool isDebt = widget.customer.openingBalance >= 0;
     // 'saving' is declared OUTSIDE the StatefulBuilder so it is not
@@ -1145,19 +1272,30 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                           final ob = isDebt ? raw : -raw;
                           final ph =
                               phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
-                          await SupabaseService.updateCustomer(
+                          final update = widget.updateCustomerForTest ??
+                              SupabaseService.updateCustomer;
+                          await update(
                             id: widget.customer.id,
                             phone: ph,
                             openingBalance: ob,
                           );
+                          // Same hypothesis-#2 fix as _showAddEntryDialog —
+                          // unfocus before popping (see that function's comment).
+                          if (ctx.mounted) FocusScope.of(ctx).unfocus();
                           if (ctx.mounted) Navigator.pop(ctx);
-                          // Fix #5: confirm save to the shopkeeper
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text('बदलाव सहेज दिए गए')));
-                          }
-                          await _load();
+                          // BUG-11-class candidate fix: defer the post-pop
+                          // reload/snackbar past the dialog's closing transition,
+                          // same reasoning as _showAddEntryDialog — not yet
+                          // reproduction-confirmed for this dialog specifically.
+                          WidgetsBinding.instance.addPostFrameCallback((_) async {
+                            // Fix #5: confirm save to the shopkeeper
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text('बदलाव सहेज दिए गए')));
+                            }
+                            await _load();
+                          });
                         } catch (e) {
                           setDialog(() => saving = false);
                           if (mounted) {
@@ -1185,8 +1323,10 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
         },
       ),
     );
-    phoneCtrl.dispose();
-    balCtrl.dispose();
+    // BUG-11 fix: no per-dialog dispose() anymore — `_phoneCtrl`/`_balCtrl`
+    // are State-level fields, disposed only in this State's own dispose().
+    // See `_amtCtrl`'s field doc comment for why the earlier
+    // addPostFrameCallback-deferral approach was confirmed insufficient.
   }
 
   // Small chip used in the edit dialog
@@ -1419,31 +1559,6 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                           ]),
                         ]),
                   ),
-                  // + दर्ज करें
-                  GestureDetector(
-                    onTap: _showAddEntryDialog,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.3)),
-                      ),
-                      child:
-                          const Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.add, size: 14, color: Colors.white),
-                        SizedBox(width: 4),
-                        Text('दर्ज करें',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600)),
-                      ]),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
                   // C-05 / C-06: edit & delete menu
                   PopupMenuButton<String>(
                     icon: const Icon(Icons.more_vert, color: Colors.white),
@@ -1478,7 +1593,33 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                     ],
                   ),
                 ]),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
+
+                // लेन-देन दर्ज करें — full-width, solid-fill primary action.
+                // Deliberately the only solid-white control in this header
+                // (back button and ⋮ stay translucent) so it reads as the
+                // primary action, distinct from the edit/delete menu.
+                SizedBox(
+                  width: double.infinity,
+                  height: 44,
+                  child: ElevatedButton.icon(
+                    onPressed: _showAddEntryDialog,
+                    icon: const Icon(Icons.add,
+                        size: 18, color: AppColors.primary),
+                    label: const Text('लेन-देन दर्ज करें',
+                        style: TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
 
                 // 3-tile summary card
                 Container(
@@ -1492,7 +1633,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                   ),
                   child: Row(children: [
                     Expanded(
-                      child: _hStat('उधार दिया',
+                      child: _hStat('कुल उधार',
                           _loading ? '—' : _fmt(_totalCreditGiven)),
                     ),
                     Container(
@@ -1501,7 +1642,7 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                         color: Colors.white.withOpacity(0.2)),
                     Expanded(
                       child: _hStat(
-                          'नकद मिला', _loading ? '—' : _fmt(_totalReceived)),
+                          'चुकाया गया', _loading ? '—' : _fmt(_totalReceived)),
                     ),
                     Container(
                         height: 30,

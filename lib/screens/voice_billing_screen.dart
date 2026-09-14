@@ -17,7 +17,33 @@ import 'recording_screen.dart';
 enum BillingView { input, settlement, success }
 
 class VoiceBillingScreen extends StatefulWidget {
-  const VoiceBillingScreen({super.key});
+  final void Function(VoidCallback) onRegisterReload;
+
+  // Test-only seam: when provided, _loadData() seeds _stockList from this
+  // directly and skips the Supabase network fetch entirely, so widget tests
+  // can exercise the item-picker's real selection flow (BUG-5b) against
+  // known stock data instead of an always-empty list. Never set in
+  // production code — default null preserves existing behavior exactly.
+  @visibleForTesting
+  final List<StockItem>? initialStockForTest;
+
+  // Test-only seam: when provided, seeds `_billItems` directly in
+  // `initState()`, bypassing the manual-add UI/modal flow entirely. Added
+  // for BUG-5a (`.claude/qa/BUGS.md`, back-navigation crash) so a widget
+  // test can get `_autoSaveDraft()` past its `_billItems.isEmpty` early
+  // return (and therefore into its real `await DraftService.saveDraft(...)`
+  // async gap) without depending on `_addManualItem()`'s own modal
+  // machinery, which is BUG-5b's unrelated code path. Never set in
+  // production code — default null preserves existing behavior exactly.
+  @visibleForTesting
+  final List<BillItem>? initialBillItemsForTest;
+
+  const VoiceBillingScreen({
+    super.key,
+    required this.onRegisterReload,
+    this.initialStockForTest,
+    this.initialBillItemsForTest,
+  });
 
   @override
   State<VoiceBillingScreen> createState() => _VoiceBillingScreenState();
@@ -39,6 +65,39 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   List<DraftBill> _drafts = [];
   String _shopName = '';
 
+  // BUG-5b instrumentation (`.claude/qa/BUGS.md`,
+  // `.claude/records/2026-09-13-bug5-architecture-review.md`). A
+  // `flutter_test` double-tap widget test (`test/voice_billing_screen_test.dart`)
+  // did NOT reproduce the crash against this code, so the Architect's
+  // primary "overlapping _addManualItem() calls" hypothesis is unconfirmed
+  // — no reentrancy guard has been applied. These counters are lightweight,
+  // no-op-cost-when-unused production logging only: if BUG-5b recurs on a
+  // real device, `adb logcat` timestamps on these two lines will show
+  // directly whether two calls actually overlapped within the same
+  // pending-frame window, turning "did the race actually happen" from a
+  // guess into a fact. Remove once BUG-5b is confirmed one way or another.
+  int _manualAddCallSeq = 0;
+  int _showItemPickerCallSeq = 0;
+
+  // BUG-5a instrumentation (`.claude/qa/BUGS.md`,
+  // `.claude/records/2026-09-13-bug5-architecture-review.md`). Same
+  // pattern as the BUG-5b counters above: a `flutter_test` widget test
+  // firing two overlapping back-navigation attempts while this screen's
+  // own `PopScope` callback below was still awaiting `_autoSaveDraft()`
+  // confirmed the overlapping-call sequencing is real (both calls fire,
+  // in order) but did NOT reproduce the `_dependents.isEmpty` assertion —
+  // the working theory (Android's OS-level predictive-back preview
+  // animation starting then being cancelled) needs real device/engine
+  // timing a synthetic, single-threaded pump loop can't drive. These
+  // counters are lightweight, no-op-cost-when-unused production logging
+  // only: if BUG-5a recurs live, `adb logcat` timestamps here and on
+  // `app.dart`'s matching `[BUG-5a]` line will show directly whether the
+  // shell-level and screen-level `PopScope` callbacks overlapped, and in
+  // what order — the "what action preceded it" question this bug has been
+  // stuck on. Remove once BUG-5a is confirmed one way or another.
+  int _autoSaveDraftCallSeq = 0;
+  int _inputPopInvokedCallSeq = 0;
+
   // Settlement
   final _customerController = TextEditingController();
   final _customerFocusNode = FocusNode();
@@ -59,6 +118,11 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
         });
       }
     });
+    widget.onRegisterReload(_maybeRefreshOnTabSwitch);
+    if (widget.initialBillItemsForTest != null) {
+      // Test-only path — see the field's doc comment.
+      _billItems = List.from(widget.initialBillItemsForTest!);
+    }
     _loadData();
   }
 
@@ -72,6 +136,11 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   }
 
   Future<void> _loadData() async {
+    if (widget.initialStockForTest != null) {
+      // Test-only path — see the field's doc comment.
+      setState(() => _stockList = widget.initialStockForTest!);
+      return;
+    }
     try {
       final results = await Future.wait([
         SupabaseService.fetchStock(),
@@ -93,7 +162,45 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
     }
   }
 
+  // Cross-tab freshness fix: an item/customer added on another tab wasn't
+  // visible here until app restart, since this screen (kept alive inside
+  // AppShell's IndexedStack) only ever fetched once, in initState. Only
+  // _stockList/_customerNames are genuinely stale across tabs — _drafts and
+  // _shopName are written solely by this same live screen instance, so
+  // they're excluded to avoid unnecessary refetches on every tab switch.
+  Future<void> _refreshStockAndCustomers() async {
+    try {
+      final results = await Future.wait([
+        SupabaseService.fetchStock(),
+        SupabaseService.fetchCustomerNames(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _stockList = results[0] as List<StockItem>;
+        _customerNames = results[1] as List<String>;
+      });
+    } catch (e, stack) {
+      debugPrint('[VoiceBillingScreen] _refreshStockAndCustomers error: $e\n$stack');
+      // Non-fatal — silently keep the existing list rather than interrupt
+      // the user with a snackbar for a background refresh.
+    }
+  }
+
+  // Gate the tab-switch refresh so it never resets state out from under a
+  // user mid-checkout — settlement/success views don't render _stockList/
+  // _customerNames at all, so skipping the refresh there loses nothing
+  // visible, and the existing post-checkout _loadData() call (below)
+  // already covers freshness once they're done.
+  void _maybeRefreshOnTabSwitch() {
+    if (_view != BillingView.input || _isProcessing) return;
+    _refreshStockAndCustomers();
+  }
+
   Future<void> _autoSaveDraft() async {
+    // BUG-5a instrumentation — see field doc above.
+    final seq = ++_autoSaveDraftCallSeq;
+    debugPrint('[BUG-5a] _autoSaveDraft call #$seq start at '
+        '${DateTime.now().toIso8601String()}, _billItems.length=${_billItems.length}');
     if (_billItems.isEmpty) return;
     final draft = DraftBill(
       id: _currentDraftId,
@@ -104,6 +211,8 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
     );
     await DraftService.saveDraft(draft);
     Analytics.billDraftSaved();
+    debugPrint('[BUG-5a] _autoSaveDraft call #$seq done at '
+        '${DateTime.now().toIso8601String()}');
   }
 
   void _resumeDraft(DraftBill draft) {
@@ -215,9 +324,23 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   }
 
   void _addManualItem() {
+    // BUG-5b instrumentation — see field doc above.
+    final seq = ++_manualAddCallSeq;
+    debugPrint('[BUG-5b] _addManualItem call #$seq at '
+        '${DateTime.now().toIso8601String()}, _billItems.length=${_billItems.length}');
     Analytics.billItemAddedManual();
     _addBlankItem();
-    _showItemPicker(_billItems.length - 1);
+    // Defer to the next frame — _addBlankItem()'s setState() only schedules
+    // a rebuild, it doesn't run one synchronously. Opening the item-picker
+    // modal immediately, before that rebuild has actually completed, races
+    // the framework's element/dependents bookkeeping (suspected cause of
+    // BUG-5's "'_dependents.isEmpty': is not true" crash — see
+    // .claude/qa/BUGS.md). addPostFrameCallback guarantees the pending
+    // rebuild has settled before the new route is pushed.
+    final index = _billItems.length - 1;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _showItemPicker(index);
+    });
   }
 
   Future<void> _finalizeBill() async {
@@ -287,6 +410,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   Future<void> _downloadPdf() async {
     try {
       final bytes = await buildBillPdfBytes(
+        context: context,
         items: _billItems,
         customerName: _customerName,
         isCredit: _isCredit,
@@ -305,6 +429,7 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   Future<void> _sharePdfOnWhatsApp() async {
     try {
       final bytes = await buildBillPdfBytes(
+        context: context,
         items: _billItems,
         customerName: _customerName,
         isCredit: _isCredit,
@@ -454,6 +579,10 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
+        // BUG-5a instrumentation — see field doc above.
+        final seq = ++_inputPopInvokedCallSeq;
+        debugPrint('[BUG-5a] _buildInput.onPopInvokedWithResult call #$seq at '
+            '${DateTime.now().toIso8601String()}, didPop=$didPop');
         if (!didPop) {
           await _autoSaveDraft();
         }
@@ -1171,6 +1300,10 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   }
 
   void _showItemPicker(int index) {
+    // BUG-5b instrumentation — see field doc above.
+    final seq = ++_showItemPickerCallSeq;
+    debugPrint('[BUG-5b] _showItemPicker call #$seq at '
+        '${DateTime.now().toIso8601String()}, index=$index, _billItems.length=${_billItems.length}');
     final controller = TextEditingController(text: _billItems[index].itemName);
     showModalBottomSheet(
       context: context,
@@ -1209,8 +1342,26 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                               subtitle: Text(
                                   '₹${s.sellingPrice} / ${s.unit}  •  स्टॉक: ${s.currentStock}'),
                               onTap: () {
-                                _selectItem(index, s.itemName);
+                                // BUG-5b (confirmed root cause, see
+                                // .claude/qa/BUGS.md): popping this sheet
+                                // and calling _selectItem() (which
+                                // setState()s the screen underneath)
+                                // synchronously in the same handler races
+                                // the sheet's own teardown — including its
+                                // local search-field controller's
+                                // .whenComplete(controller.dispose) — against
+                                // the parent rebuild and the pop's own
+                                // closing transition. Pop first (closes
+                                // immediately, as the user expects, and lets
+                                // the sheet's teardown run on its own
+                                // schedule), then defer the state update to
+                                // the next frame, after that teardown has
+                                // settled.
                                 Navigator.pop(ctx);
+                                WidgetsBinding.instance
+                                    .addPostFrameCallback((_) {
+                                  if (mounted) _selectItem(index, s.itemName);
+                                });
                               },
                             ))
                         .toList(),
@@ -1221,7 +1372,11 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
           ),
         ),
       ),
-    ).whenComplete(controller.dispose);
+    ).whenComplete(() {
+      // Defer disposal past the sheet's own closing-transition frame — see
+      // the onTap comment above for the full BUG-5b mechanism.
+      WidgetsBinding.instance.addPostFrameCallback((_) => controller.dispose());
+    });
   }
 
   Widget _discountSection() {

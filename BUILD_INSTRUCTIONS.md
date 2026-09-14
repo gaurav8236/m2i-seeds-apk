@@ -89,6 +89,42 @@ static const String supabaseAnonKey = 'YOUR_SUPABASE_ANON_KEY';
 static const String railwayBaseUrl = 'YOUR_RAILWAY_API_URL';
 ```
 
+## Release Signing
+
+`flutter build apk --release` will currently succeed but fall back to
+signing with the **debug keystore** (with a warning printed during the
+Gradle build) unless `android/key.properties` exists. **A debug-signed
+APK must never be distributed** — not via Play Store (won't be accepted
+past internal testing without a real key), nor as a side-loaded APK where
+users are expected to receive future updates (Android treats
+differently-signed APKs as different apps for update purposes).
+
+To produce a real, distributable release build, one-time setup (do this
+yourself — an agent should not generate or handle your real signing key):
+
+1. Generate an upload/release keystore:
+   ```
+   keytool -genkey -v -keystore /path/outside/this/repo/upload-keystore.jks \
+     -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+   ```
+   Store this `.jks` file **outside the repo**, and back it up somewhere
+   durable (e.g. a password manager or secure cloud storage) — if it's
+   lost, you permanently lose the ability to publish updates to the same
+   app under the same identity on the Play Store.
+
+2. Create `android/key.properties` (already gitignored — never commit it):
+   ```
+   storePassword=<your store password>
+   keyPassword=<your key password>
+   keyAlias=upload
+   storeFile=/path/outside/this/repo/upload-keystore.jks
+   ```
+
+3. Run `flutter build apk --release` (or `--release` app bundle) again —
+   `android/app/build.gradle` will pick up `key.properties` automatically
+   and sign with the real key instead of debug, with no further changes
+   needed.
+
 ## Permissions Required
 
 The app requests these permissions at runtime:
