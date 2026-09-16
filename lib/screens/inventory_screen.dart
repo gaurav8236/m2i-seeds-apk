@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/supabase_service.dart';
 import '../theme.dart';
+import '../utils/errors.dart';
 import '../utils/unit_categories.dart';
 import '../utils/validators.dart';
 import 'stock_item_detail_screen.dart';
@@ -84,7 +85,7 @@ class _InventoryScreenState extends State<InventoryScreen>
       if (!mounted) return;
       setState(() { _stock = stock; _masterInventory = master; });
     } catch (e) {
-      if (mounted) _snack('लोड नहीं हो सका: $e');
+      if (mounted) _snack(Errors.friendlyMessage(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -264,7 +265,7 @@ class _InventoryScreenState extends State<InventoryScreen>
         _snack('$addCount सामान सफलतापूर्वक जोड़े गए!');
       }
     } catch (e) {
-      if (mounted) _snack('सेव नहीं हो सका: $e');
+      if (mounted) _snack(Errors.friendlyMessage(e));
     } finally {
       if (mounted) setState(() => _submitting = false);
     }

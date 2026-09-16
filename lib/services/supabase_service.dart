@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/models.dart';
 import '../supabase_config.dart';
+import '../utils/errors.dart';
 import 'auth_service.dart';
 
 enum StatsPeriod { today, thisWeek, thisMonth, custom }
@@ -387,7 +388,7 @@ class SupabaseService {
         return 'इस नाम का ग्राहक पहले से मौजूद है';
       }
     }
-    return 'त्रुटि: $e';
+    return Errors.friendlyMessage(e);
   }
 
   static Future<void> createCustomer({
