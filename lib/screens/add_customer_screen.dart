@@ -59,8 +59,8 @@ class _AddCustomerScreenState extends State<AddCustomerScreen> {
       Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('त्रुटि: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(SupabaseService.customerSaveErrorMessage(e))));
       }
     } finally {
       if (mounted) setState(() => _saving = false);

@@ -285,16 +285,59 @@ class _InventoryScreenState extends State<InventoryScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.bg,
-      body: Column(children: [
-        _header(),
-        Expanded(child: TabBarView(
-          controller: _tabCtrl,
-          children: [_addTab(), _listTab()],
-        )),
-      ]),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        // This screen is a permanent IndexedStack tab (app.dart), not a
+        // pushed route — AppShell's own PopScope always fires alongside this
+        // one and switches away from this tab regardless of what happens
+        // here (same architecture as VoiceBillingScreen's PopScope; see
+        // app.dart's BUG-5a note), so a confirm-before-leaving dialog can't
+        // actually keep the user on this tab. Matching VoiceBillingScreen's
+        // approach, discard any unsaved add-item state now instead of
+        // leaving it stale in memory for when the user returns (#31).
+        if (!didPop) _discardUnsavedAddFormOnBack();
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.bg,
+        body: Column(children: [
+          _header(),
+          Expanded(child: TabBarView(
+            controller: _tabCtrl,
+            children: [_addTab(), _listTab()],
+          )),
+        ]),
+      ),
     );
+  }
+
+  /// Whether the add-item form has anything a back-nav could silently lose.
+  bool get _addFormDirty =>
+      _preview.isNotEmpty ||
+      _nameCtrl.text.trim().isNotEmpty ||
+      _categoryCtrl.text.trim().isNotEmpty ||
+      _unitCtrl.text.trim().isNotEmpty ||
+      _priceCtrl.text.trim().isNotEmpty ||
+      _stockCtrl.text.trim().isNotEmpty ||
+      _aliasCtrl.text.trim().isNotEmpty ||
+      _aliases.isNotEmpty;
+
+  void _discardUnsavedAddFormOnBack() {
+    if (!_addFormDirty) return;
+    setState(() {
+      _nameCtrl.clear();
+      _categoryCtrl.clear();
+      _unitCtrl.clear();
+      _priceCtrl.clear();
+      _stockCtrl.clear();
+      _aliasCtrl.clear();
+      _selCategory = null;
+      _selUnit = null;
+      _aliases = [];
+      _suggestions = [];
+      _showSuggestions = false;
+      _preview.clear();
+    });
   }
 
   Widget _header() {
@@ -367,15 +410,21 @@ class _InventoryScreenState extends State<InventoryScreen>
   // ── Tab 1 — Add ────────────────────────────────────────────────────────────
 
   Widget _addTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(children: [
-        _formCard(),
-        if (_preview.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          _previewCard(),
-        ],
-      ]),
+    // SafeArea(top: false) so the save buttons clear the home indicator/
+    // gesture bar at the bottom, matching the pattern already used by 4
+    // other screens (#18).
+    return SafeArea(
+      top: false,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(children: [
+          _formCard(),
+          if (_preview.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _previewCard(),
+          ],
+        ]),
+      ),
     );
   }
 

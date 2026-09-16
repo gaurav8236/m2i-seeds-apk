@@ -371,6 +371,25 @@ class SupabaseService {
     return customers;
   }
 
+  // Duplicate name/phone are enforced by unique indexes at the DB level
+  // (sprint6_001_customer_unique_name.sql, sprint2_005_phone_uniqueness.sql),
+  // so a save fails with a raw Postgres 23505 unique_violation rather than a
+  // pre-check. This turns that raw exception into the correct specific
+  // Hindi message instead of leaking the Postgres constraint name to the
+  // shopkeeper via a generic "त्रुटि: $e" catch-all.
+  static String customerSaveErrorMessage(Object e) {
+    if (e is PostgrestException && e.code == '23505') {
+      final msg = e.message;
+      if (msg.contains('idx_customers_user_phone_unique')) {
+        return 'यह मोबाइल नंबर पहले से किसी और ग्राहक के नाम पर दर्ज है';
+      }
+      if (msg.contains('customers_user_id_name_lower_idx')) {
+        return 'इस नाम का ग्राहक पहले से मौजूद है';
+      }
+    }
+    return 'त्रुटि: $e';
+  }
+
   static Future<void> createCustomer({
     required String name,
     String? phone,

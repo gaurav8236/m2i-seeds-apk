@@ -16,15 +16,26 @@ class Validators {
     if (s.isEmpty) return 'नाम भरें';
     if (s.length < 2) return 'नाम कम से कम 2 अक्षर का होना चाहिए';
     if (s.length > 60) return 'नाम 60 अक्षर से अधिक नहीं हो सकता';
+    // Allow Hindi (Devanagari), English letters, spaces, dot, hyphen, apostrophe —
+    // same char class as add_customer_screen.dart's inline name validator (#37),
+    // blocks pure-special-character names like "!!!" (#11).
+    if (!RegExp(r"^[ऀ-ॿa-zA-Z\s.\-']+$").hasMatch(s)) {
+      return 'नाम में केवल अक्षर, स्पेस, . और - अनुमत हैं';
+    }
     return null;
   }
 
-  /// Shop name — optional; if non-empty, 2–60 chars, no spaces-only (#14).
+  /// Shop name — required, 2–60 chars, no spaces-only (#10, #14).
   static String? shopName(String? v) {
     final s = v?.trim() ?? '';
-    if (s.isEmpty) return null; // optional
+    if (s.isEmpty) return 'दुकान का नाम भरें';
     if (s.length < 2) return 'दुकान का नाम कम से कम 2 अक्षर का होना चाहिए';
     if (s.length > 60) return 'दुकान का नाम 60 अक्षर से अधिक नहीं हो सकता';
+    // Same char-class gap as displayName (#11) — mirrors add_customer_screen.dart's
+    // inline validator regex so a pure-special-character shop name is rejected (#14).
+    if (!RegExp(r"^[ऀ-ॿa-zA-Z\s.\-']+$").hasMatch(s)) {
+      return 'दुकान के नाम में केवल अक्षर, स्पेस, . और - अनुमत हैं';
+    }
     return null;
   }
 

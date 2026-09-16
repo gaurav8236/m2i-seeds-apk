@@ -1300,7 +1300,9 @@ class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
                           setDialog(() => saving = false);
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('त्रुटि: $e')));
+                                SnackBar(
+                                    content: Text(SupabaseService
+                                        .customerSaveErrorMessage(e))));
                           }
                         }
                       },
