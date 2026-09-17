@@ -146,7 +146,7 @@ Below are all major features of SmartDukan and how they interconnect across the 
 | 38 | Phone number > 10 digits allowed | Bug | Validation |
 | 39 | Alphabets allowed in phone number field | Bug | Validation — input type |
 | 40 | Duplicate phone number allowed for different customers | Bug | DB unique constraint missing |
-| 41 | Wrong error message when renaming to existing customer name | Bug | Error message copy |
+| 41 | ✅ Wrong error message when renaming to existing customer name | Bug | ~~Error message copy~~ **Resolved by redesign (2026-09-14):** Sprint 11's customer-edit redesign (commit `6903b4d`) removed name-editing from the app entirely — the edit-customer dialog now always shows the name read-only (locked with a warning banner when past bills exist), so the rename-to-duplicate-name scenario this bug describes can no longer occur. The Sprint 6 fix this row originally referred to (`checkCustomerNameExists(excludeId:)` in `supabase_service.dart`) is now dead code with no caller — flagged for removal, see `.claude/TODOS.md`. |
 | 42 | Same name with different casing treated as different customer | 📐 Schema | Normalize to lowercase before save + unique constraint |
 | 43 | No error for negative "पहले से बकाया" value | Bug | Validation |
 | 44 | No error for invalid "पहले से बकाया" value | Bug | Validation |
@@ -159,7 +159,7 @@ Below are all major features of SmartDukan and how they interconnect across the 
 | 52 | History disappears when customer name is changed | 📐 Schema | **Critical** — `past_bills.customer_name` is a string FK, not an ID. Name change breaks all bill history |
 | 55 | ₹3,090 displayed as ₹3.0K instead of full amount | Bug | `fmtCurrency()` — threshold too low, needs config |
 
-**Root cause cluster:** The biggest structural issue is #52 — **customer identity is stored as a name string in `past_bills` table, not as a `customer_id` foreign key**. This is a schema-level redesign. When name changes, all history is orphaned. Bugs #41 and #42 (casing) are part of the same root cause.
+**Root cause cluster:** The biggest structural issue is #52 — **customer identity is stored as a name string in `past_bills` table, not as a `customer_id` foreign key**. This is a schema-level redesign. When name changes, all history is orphaned. #42 (casing) is part of the same root cause. #41 was part of this cluster too, but is now moot — renaming was removed from the app in Sprint 11 rather than fixed at the schema level (see #41's own row above).
 
 ---
 
@@ -244,7 +244,7 @@ Bugs: #3, #10, #11, #14, #21, #24, #26, #28, #30, #32, #34, #35, #37, #38, #39, 
 All addressable with a shared validator utility.
 
 ### 🟢 P3 — Low (UX polish)
-Bugs: #1, #12, #13, #16, #18, #23, #25, #27, #29, #31, #41, #55, #56
+Bugs: #1, #12, #13, #16, #18, #23, #25, #27, #29, #31, ~~#41~~ (resolved by redesign), #55, #56
 
 ---
 
@@ -368,7 +368,7 @@ Sync mechanism: NONE currently — Admin uses force-dynamic but no realtime subs
 | 38 | Phone > 10 digits allowed | F4 Customer | P2 | 🔴 Open | No |
 | 39 | Alphabets in phone number | F4 Customer | P2 | 🔴 Open | No |
 | 40 | Duplicate phone number for different customers | F4 Customer | P2 | 🔴 Open | Yes |
-| 41 | Wrong error on duplicate customer name update | F4 Customer | P3 | 🔴 Open | No |
+| 41 | Wrong error on duplicate customer name update | F4 Customer | P3 | ✅ Resolved by redesign (renaming removed, see F4 table above) | N/A |
 | 42 | Same name different casing = different customer | F4 Customer | P1 | 🔴 Open | Yes |
 | 43 | Negative value in पहले से बकाया | F4 Customer | P2 | 🔴 Open | No |
 | 44 | Invalid value in पहले से बकाया | F4 Customer | P2 | 🔴 Open | No |

@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/supabase_service.dart';
 import '../theme.dart';
+import '../utils/errors.dart';
 import '../utils/unit_categories.dart';
 import '../utils/validators.dart';
 
@@ -239,7 +240,7 @@ class _StockItemDetailScreenState extends State<StockItemDetailScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('त्रुटि: $e')));
+            .showSnackBar(SnackBar(content: Text(Errors.friendlyMessage(e))));
       }
     } finally {
       if (mounted) setState(() => _saving = false);

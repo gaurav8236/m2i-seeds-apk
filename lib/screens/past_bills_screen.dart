@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/supabase_service.dart';
 import '../theme.dart';
+import '../utils/errors.dart';
 import '../widgets/bill_card.dart';
 
 class PastBillsScreen extends StatefulWidget {
@@ -31,7 +32,7 @@ class _PastBillsScreenState extends State<PastBillsScreen> {
     } catch (e) {
       if (mounted)
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('लोड नहीं हो सका: $e')));
+            .showSnackBar(SnackBar(content: Text(Errors.friendlyMessage(e))));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

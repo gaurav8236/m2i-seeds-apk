@@ -22,6 +22,54 @@ if (flutterVersionName == null) {
     flutterVersionName = '1.0'
 }
 
+// --- Release signing -------------------------------------------------------
+// Real release builds must be signed with a dedicated upload/release keystore,
+// NOT the default debug keystore. That keystore is a secret and must never be
+// committed to git.
+//
+// To set this up (one-time, done by a human, not CI):
+//   1. Generate a keystore:
+//        keytool -genkey -v -keystore ~/upload-keystore.jks \
+//          -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+//      (store the resulting .jks somewhere safe OUTSIDE this repo/machine —
+//      losing it means losing the ability to publish updates under the same
+//      app identity on Play Store, permanently)
+//   2. Create android/key.properties (gitignored, never committed) with:
+//        storePassword=<password>
+//        keyPassword=<password>
+//        keyAlias=upload
+//        storeFile=/absolute/or/relative/path/to/upload-keystore.jks
+//
+// Until key.properties exists, release builds fall back to the debug
+// signing config (with a loud warning at build time) so `flutter build apk
+// --release` doesn't hard-fail — but that output must NOT be distributed.
+def keystorePropertiesFile = rootProject.file('key.properties')
+def keystoreProperties = new Properties()
+def hasReleaseSigning = keystorePropertiesFile.exists()
+if (hasReleaseSigning) {
+    keystorePropertiesFile.withReader('UTF-8') { reader ->
+        keystoreProperties.load(reader)
+    }
+}
+
+gradle.taskGraph.whenReady { taskGraph ->
+    def buildingRelease = taskGraph.allTasks.any { it.name.contains('Release') }
+    if (buildingRelease && !hasReleaseSigning) {
+        println ''
+        println '=================================================================='
+        println 'WARNING: android/key.properties not found.'
+        println 'This "release" build is being signed with the DEBUG keystore, not'
+        println 'a real upload/release key. It must NOT be distributed (Play Store'
+        println 'internal testing, side-loaded APK with update continuity, etc. all'
+        println 'require a real release key).'
+        println 'See mobile/BUILD_INSTRUCTIONS.md for how to generate a real'
+        println 'keystore and wire it up via android/key.properties.'
+        println '=================================================================='
+        println ''
+    }
+}
+// ---------------------------------------------------------------------------
+
 android {
     namespace "com.smartdukan.app"
     compileSdk flutter.compileSdkVersion
@@ -49,9 +97,23 @@ android {
         multiDexEnabled true
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig signingConfigs.debug
+            // Uses the real release keystore when android/key.properties is
+            // present; otherwise falls back to debug signing (see warning
+            // above) so local/dev release builds still work.
+            signingConfig hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
             minifyEnabled false
             shrinkResources false
         }

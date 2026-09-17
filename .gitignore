@@ -16,6 +16,11 @@ android/.gradle/
 android/local.properties
 android/app/debug.keystore
 android/captures/
+
+# Release signing secrets — never commit these
+android/key.properties
+*.jks
+*.keystore
 **/android/**/GeneratedPluginRegistrant.java
 **/android/**/GeneratedPluginRegistrant.kt
 
