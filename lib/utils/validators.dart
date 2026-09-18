@@ -17,7 +17,6 @@ class Validators {
     if (s.length < 2) return 'नाम कम से कम 2 अक्षर का होना चाहिए';
     if (s.length > 60) return 'नाम 60 अक्षर से अधिक नहीं हो सकता';
     // Allow Hindi (Devanagari), English letters, spaces, dot, hyphen, apostrophe —
-    // same char class as add_customer_screen.dart's inline name validator (#37),
     // blocks pure-special-character names like "!!!" (#11).
     if (!RegExp(r"^[ऀ-ॿa-zA-Z\s.\-']+$").hasMatch(s)) {
       return 'नाम में केवल अक्षर, स्पेस, . और - अनुमत हैं';
@@ -31,8 +30,8 @@ class Validators {
     if (s.isEmpty) return 'दुकान का नाम भरें';
     if (s.length < 2) return 'दुकान का नाम कम से कम 2 अक्षर का होना चाहिए';
     if (s.length > 60) return 'दुकान का नाम 60 अक्षर से अधिक नहीं हो सकता';
-    // Same char-class gap as displayName (#11) — mirrors add_customer_screen.dart's
-    // inline validator regex so a pure-special-character shop name is rejected (#14).
+    // Same char-class gap as displayName (#11) — rejects a pure-special-character
+    // shop name (#14).
     if (!RegExp(r"^[ऀ-ॿa-zA-Z\s.\-']+$").hasMatch(s)) {
       return 'दुकान के नाम में केवल अक्षर, स्पेस, . और - अनुमत हैं';
     }
@@ -99,50 +98,7 @@ class Validators {
     return null;
   }
 
-  // ── Customers ─────────────────────────────────────────────────────────────
-
-  /// Customer name — required, max 80 chars, no special chars (#37).
-  static String? customerName(String? v) {
-    final s = v?.trim() ?? '';
-    if (s.isEmpty) return 'नाम भरें';
-    if (s.length > 80) return 'नाम 80 अक्षर से अधिक नहीं हो सकता';
-    // Disallow special chars that cause ledger-key collisions
-    if (RegExp(r'[<>"\{\}\[\]\\|]').hasMatch(s)) {
-      return 'नाम में विशेष चिह्न न डालें';
-    }
-    return null;
-  }
-
-  /// Phone — optional field. If provided, must be exactly 10 digits.
-  static String? phone(String? v) {
-    final s = v?.trim() ?? '';
-    if (s.isEmpty) return null; // optional
-    if (!RegExp(r'^\d{10}$').hasMatch(s)) {
-      return 'फ़ोन नंबर 10 अंकों का होना चाहिए';
-    }
-    return null;
-  }
-
-  // ── Payments ──────────────────────────────────────────────────────────────
-
-  /// Payment amount — must be > 0.
-  static String? paymentAmount(String? v) {
-    if (v == null || v.trim().isEmpty) return 'राशि भरें';
-    final n = double.tryParse(v.trim());
-    if (n == null) return 'राशि सही नहीं है';
-    if (n <= 0) return 'राशि 0 से अधिक होनी चाहिए';
-    return null;
-  }
-
-  /// Opening balance — optional, must be ≥ 0 if provided.
-  static String? openingBalance(String? v) {
-    final s = v?.trim() ?? '';
-    if (s.isEmpty) return null; // defaults to 0
-    final n = double.tryParse(s);
-    if (n == null) return 'राशि सही नहीं है';
-    if (n < 0) return 'शुरुआती बकाया 0 से कम नहीं हो सकता';
-    return null;
-  }
+  // ── Billing ───────────────────────────────────────────────────────────────
 
   /// Discount amount — must be ≥ 0.
   static String? discount(String? v) {

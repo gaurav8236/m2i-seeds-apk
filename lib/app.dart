@@ -165,9 +165,9 @@ class _AppShellState extends State<AppShell> {
               label: 'स्टॉक',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.menu_book_outlined),
-              activeIcon: Icon(Icons.menu_book),
-              label: 'खाता',
+              icon: Icon(Icons.receipt_long_outlined),
+              activeIcon: Icon(Icons.receipt_long),
+              label: 'रिपोर्ट',
             ),
           ],
         ),

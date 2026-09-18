@@ -57,8 +57,6 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   List<String> _customerNames = [];
   double _discount = 0;
   bool _isCredit = false;
-  bool _isSplit = false;
-  final _nagadCtrl = TextEditingController();
   String _customerName = '';
   double _finalTotal = 0;
   String _currentDraftId = DateTime.now().millisecondsSinceEpoch.toString();
@@ -130,7 +128,6 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
   void dispose() {
     _customerController.dispose();
     _customerFocusNode.dispose();
-    _nagadCtrl.dispose();
     VoiceService.dispose();
     super.dispose();
   }
@@ -345,8 +342,8 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
 
   Future<void> _finalizeBill() async {
     // ── Pre-flight validations ────────────────────────────────────────────────
-    // Business rule: a credit (उधार) bill must be tied to a named customer so
-    // that repayment can be tracked in their ledger.
+    // Business rule: a credit (उधार) bill must be tied to a named customer —
+    // an unnamed "credit" sale has no one to collect from.
     if (_isCredit && _customerName.trim().isEmpty) {
       _showSnack('उधार बिल के लिए ग्राहक का नाम ज़रूरी है');
       return;
@@ -373,18 +370,12 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
       final subTotal = validItems.fold(0.0, (s, i) => s + i.itemTotal);
       final finalTotal = (subTotal - _discount).clamp(0.0, double.infinity);
 
-      final nagad = _isSplit
-          ? (double.tryParse(_nagadCtrl.text) ?? 0)
-              .clamp(0, finalTotal)
-              .toDouble()
-          : 0.0;
       await SupabaseService.checkout(
         items: validItems.map((i) => i.toMap()).toList(),
         totalAmount: finalTotal,
         discountAmount: _discount,
         customerName: _customerName.isEmpty ? null : _customerName,
         isCredit: _isCredit,
-        nagadAmount: nagad,
       );
 
       Analytics.billConfirmed(
@@ -451,8 +442,6 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
       _billItems = [];
       _discount = 0;
       _isCredit = false;
-      _isSplit = false;
-      _nagadCtrl.clear();
       _customerName = '';
       _customerController.clear();
       _finalTotal = 0;
@@ -1956,110 +1945,11 @@ class _VoiceBillingScreenState extends State<VoiceBillingScreen> {
                             ]),
                         Switch(
                           value: _isCredit,
-                          onChanged: (v) => setState(() {
-                            _isCredit = v;
-                            if (!v) {
-                              _isSplit = false;
-                              _nagadCtrl.clear();
-                            }
-                          }),
+                          onChanged: (v) => setState(() => _isCredit = v),
                           activeThumbColor: AppColors.primary,
                         ),
                       ],
                     ),
-
-                    // Split toggle — only visible when credit is on
-                    if (_isCredit) ...[
-                      const Divider(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('कुछ नकद भी दिया?',
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 13)),
-                                Text('Part cash + part credit',
-                                    style: TextStyle(
-                                        fontSize: 11,
-                                        color: AppColors.textMuted)),
-                              ]),
-                          Switch(
-                            value: _isSplit,
-                            onChanged: (v) => setState(() {
-                              _isSplit = v;
-                              if (!v) _nagadCtrl.clear();
-                            }),
-                            activeColor: AppColors.warning,
-                          ),
-                        ],
-                      ),
-                      if (_isSplit) ...[
-                        const SizedBox(height: 10),
-                        Builder(builder: (ctx) {
-                          final subTotal =
-                              _billItems.fold(0.0, (s, i) => s + i.itemTotal);
-                          final finalTotal = (subTotal - _discount)
-                              .clamp(0.0, double.infinity);
-                          final nagadAmt =
-                              double.tryParse(_nagadCtrl.text) ?? 0;
-                          final udharAmt = (finalTotal - nagadAmt)
-                              .clamp(0.0, double.infinity);
-                          return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('अभी नकद दिया (₹)',
-                                    style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: AppColors.textMuted)),
-                                const SizedBox(height: 6),
-                                TextField(
-                                  controller: _nagadCtrl,
-                                  keyboardType: TextInputType.number,
-                                  onChanged: (_) => setState(() {}),
-                                  decoration: InputDecoration(
-                                    prefixText: '₹ ',
-                                    hintText: '0',
-                                    isDense: true,
-                                    suffixText:
-                                        'max ₹${finalTotal.toStringAsFixed(0)}',
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.warningLight,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                        color: AppColors.warning
-                                            .withValues(alpha: 0.35)),
-                                  ),
-                                  child: Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Text('बकाया रहेगा:',
-                                          style: TextStyle(
-                                              fontSize: 12,
-                                              color: AppColors.warning,
-                                              fontWeight: FontWeight.w600)),
-                                      Text('₹${udharAmt.toStringAsFixed(0)}',
-                                          style: TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w800,
-                                              color: AppColors.warning)),
-                                    ],
-                                  ),
-                                ),
-                              ]);
-                        }),
-                      ],
-                    ],
 
                     const Divider(height: 24),
 

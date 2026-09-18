@@ -19,7 +19,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   bool _loading = true;
-  double _credit = 0, _paid = 0, _outstanding = 0;
+  double _credit = 0, _paid = 0;
   int _lowStockCount = 0;
   List<Bill> _recentBills = [];
   StatsPeriod _period = StatsPeriod.thisMonth;
@@ -63,26 +63,19 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _loading = true);
     try {
       final range = _rangeFor(_period);
-      // Perf (Sprint 7, P2-c): fetchTotalOutstanding() now reads
-      // customers.running_balance directly (O(customer count)) instead of
-      // walking past_bills, so it no longer needs to wait on
-      // fetchPastBills() — folded into the same parallel Future.wait.
       final results = await Future.wait([
         SupabaseService.fetchFilteredStats(from: range.start, to: range.end),
         SupabaseService.fetchStock(),
         SupabaseService.fetchPastBills(),
         AuthService.fetchProfile(),
-        SupabaseService.fetchTotalOutstanding(),
       ]);
       final stats = results[0] as Map<String, double>;
       final stock = results[1] as List<StockItem>;
       final bills = results[2] as List<Bill>;
       final profile = results[3] as Map<String, String?>;
-      final outstanding = results[4] as double;
       setState(() {
         _credit = stats['credit'] ?? 0;
         _paid = stats['paid'] ?? 0;
-        _outstanding = outstanding;
         _lowStockCount = stock.where((s) => s.isLow).length;
         _recentBills = bills.take(4).toList();
         _avatarUrl = profile['photo_url'];
@@ -240,12 +233,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: 12),
                   ],
 
-                  // ── बकाया card (always-current, not period-filtered) ──
-                  if (!_loading && _outstanding > 0) ...[
-                    _bakayaCard(),
-                    const SizedBox(height: 12),
-                  ],
-
                   // ── New Bill CTA ─────────────────────────────────────
                   _newBillCTA(context),
                   const SizedBox(height: 10),
@@ -255,7 +242,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       Expanded(child: _actionCard(context, Icons.inventory_2_outlined, 'स्टॉक', 'प्रबंधन करें', 2)),
                       const SizedBox(width: 10),
-                      Expanded(child: _actionCard(context, Icons.menu_book_outlined, 'ग्राहक खाता', 'बकाया देखें', 3)),
+                      Expanded(child: _actionCard(context, Icons.receipt_long_outlined, 'रिपोर्ट', 'बिक्री देखें', 3)),
                     ],
                   ),
                   const SizedBox(height: 20),
@@ -390,56 +377,6 @@ class _HomeScreenState extends State<HomeScreen> {
         color: Colors.white.withValues(alpha: 0.18),
         margin: const EdgeInsets.symmetric(horizontal: 8),
       );
-
-  Widget _bakayaCard() {
-    return GestureDetector(
-      onTap: () => widget.onTabChange(3),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: const Color(0xFFFFF1F1),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFFFCACA)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 36, height: 36,
-              decoration: BoxDecoration(
-                color: AppColors.dangerLight,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.account_balance_wallet_outlined,
-                  color: AppColors.danger, size: 18),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('कुल बकाया उधार',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
-                        color: AppColors.danger)),
-                Text(
-                  _loading ? '—' : _fmt(_outstanding),
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800,
-                      color: AppColors.danger, letterSpacing: -0.5),
-                ),
-              ]),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: AppColors.danger,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Text('देखें',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                      color: Colors.white)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _lowStockBanner() {
     return GestureDetector(

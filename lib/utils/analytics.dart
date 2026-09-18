@@ -41,9 +41,6 @@ import 'package:logrocket_flutter/logrocket_flutter.dart';
 ///   low_stock_alert_shown  — low-stock banner visible on home  [count: Int]
 ///   stock_item_viewed      — user opened a stock item detail  [item_name: String]
 ///
-/// Customers
-///   customer_added         — new customer created
-///
 /// Profile
 ///   profile_updated        — shop name / display name saved
 /// ───────────────────────────────────────────────────────────────────
@@ -133,10 +130,6 @@ class Analytics {
 
   static void stockItemViewed({required String itemName}) =>
       _track('stock_item_viewed', (e) => e..putString('item_name', itemName));
-
-  // ── Customers ─────────────────────────────────────────────────────
-
-  static void customerAdded() => _track('customer_added');
 
   // ── Profile ───────────────────────────────────────────────────────
 

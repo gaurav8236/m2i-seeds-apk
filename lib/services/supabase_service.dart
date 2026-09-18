@@ -4,7 +4,6 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/models.dart';
 import '../supabase_config.dart';
-import '../utils/errors.dart';
 import 'auth_service.dart';
 
 enum StatsPeriod { today, thisWeek, thisMonth, custom }
@@ -176,10 +175,10 @@ class SupabaseService {
 
   // ── Checkout ───────────────────────────────────────────────────────────────
 
-  // Shared response handling for every /voice-checkout/ caller (checkout,
-  // recordPayment, recordDeposit). Bug fix (Sprint 7): the endpoint returns
-  // HTTP 200 even for {"status": "partial", ...} (oversold, nothing saved)
-  // — checking only statusCode silently treated that as success.
+  // Response handling for the /voice-checkout/ caller (checkout). Bug fix
+  // (Sprint 7): the endpoint returns HTTP 200 even for {"status": "partial",
+  // ...} (oversold, nothing saved) — checking only statusCode silently
+  // treated that as success.
   static void _checkCheckoutResponse(http.Response response, String failureLabel) {
     if (response.statusCode != 200) {
       throw Exception('$failureLabel: ${response.statusCode}');
@@ -307,131 +306,19 @@ class SupabaseService {
     return {'credit': credit, 'paid': paid};
   }
 
-  // Total unpaid उधार across ALL customers — not period-filtered.
-  //
-  // Perf (Sprint 7, P2-c): previously walked a shop's ENTIRE past_bills
-  // history on every call (O(bill count), even after the 2026-09-13 dedupe
-  // that removed the redundant duplicate fetch but not the underlying
-  // per-load cost). Now reads the server-maintained running_balance column
-  // directly — O(customer count) — see
-  // mobile/migrations/sprint7_001_customer_running_balance.sql and
-  // sprint7_002_checkout_rpc.sql (which keeps running_balance current on
-  // every checkout). Uses per-customer clamping (not a single aggregate
-  // clamp) so that an overpayment by Customer A never cancels Customer B's
-  // outstanding (#48) — same semantics as before, just computed server-side
-  // incrementally instead of client-side from scratch each load.
-  static Future<double> fetchTotalOutstanding() async {
-    final userId = _userId;
-    if (userId == null) return 0;
-
-    final custRes = await _client
-        .from('customers')
-        .select('opening_balance, running_balance')
-        .eq('user_id', userId);
-
-    double total = 0;
-    for (final c in (custRes as List)) {
-      final opening = (c['opening_balance'] as num?)?.toDouble() ?? 0;
-      final running = (c['running_balance'] as num?)?.toDouble() ?? 0;
-      total += (opening + running).clamp(0.0, double.infinity);
-    }
-    return total;
-  }
-
   // ── Customers ──────────────────────────────────────────────────────────────
-
-  // Perf (Sprint 7, P2-c): previously walked a shop's ENTIRE past_bills
-  // history to aggregate credit/paid per customer on every call — now reads
-  // running_balance directly (see fetchTotalOutstanding()'s note above).
-  // No per-customer clamp here — negative = customer has a credit balance
-  // (advance deposit / overpayment), matching pre-Sprint-7 semantics exactly.
-  static Future<List<Customer>> fetchCustomers() async {
-    final userId = _userId;
-    if (userId == null) return [];
-
-    final custRes = await _client
-        .from('customers')
-        .select('*')
-        .eq('user_id', userId)
-        .order('name');
-
-    final customers = (custRes as List).map((c) {
-      final customer = Customer.fromMap(c);
-      customer.outstanding = customer.openingBalance + customer.runningBalance;
-      return customer;
-    }).toList();
-
-    // Sort: outstanding-first (highest due at top), then alphabetical
-    customers.sort((a, b) {
-      if (b.outstanding != a.outstanding) {
-        return b.outstanding.compareTo(a.outstanding);
-      }
-      return a.name.compareTo(b.name);
-    });
-
-    return customers;
-  }
-
-  // Duplicate name/phone are enforced by unique indexes at the DB level
-  // (sprint6_001_customer_unique_name.sql, sprint2_005_phone_uniqueness.sql),
-  // so a save fails with a raw Postgres 23505 unique_violation rather than a
-  // pre-check. This turns that raw exception into the correct specific
-  // Hindi message instead of leaking the Postgres constraint name to the
-  // shopkeeper via a generic "त्रुटि: $e" catch-all.
-  static String customerSaveErrorMessage(Object e) {
-    if (e is PostgrestException && e.code == '23505') {
-      final msg = e.message;
-      if (msg.contains('idx_customers_user_phone_unique')) {
-        return 'यह मोबाइल नंबर पहले से किसी और ग्राहक के नाम पर दर्ज है';
-      }
-      if (msg.contains('customers_user_id_name_lower_idx')) {
-        return 'इस नाम का ग्राहक पहले से मौजूद है';
-      }
-    }
-    return Errors.friendlyMessage(e);
-  }
-
-  static Future<void> createCustomer({
-    required String name,
-    String? phone,
-    double openingBalance = 0,
-  }) async {
-    final userId = _userId;
-    if (userId == null) throw Exception('Not authenticated');
-    await _client.from('customers').insert({
-      'user_id': userId,
-      'name': name.trim(),
-      if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim(),
-      'opening_balance': openingBalance,
-    });
-  }
-
-  // C-05: update phone / opening_balance. Name edits are blocked at the UI
-  // layer if the customer has any past bills.
-  static Future<void> updateCustomer({
-    required String id,
-    String? phone, // pass '' to clear, null to leave unchanged
-    double? openingBalance,
-  }) async {
-    final userId = _userId;
-    if (userId == null) throw Exception('Not authenticated');
-    final updates = <String, dynamic>{};
-    if (phone != null) updates['phone'] = phone.isEmpty ? null : phone;
-    if (openingBalance != null) updates['opening_balance'] = openingBalance;
-    if (updates.isEmpty) return;
-    await _client
-        .from('customers')
-        .update(updates)
-        .eq('id', id)
-        .eq('user_id', userId);
-  }
-
-  // C-06: hard-delete. Caller MUST verify outstanding == 0 before calling.
-  static Future<void> deleteCustomer(String id) async {
-    final userId = _userId;
-    if (userId == null) throw Exception('Not authenticated');
-    await _client.from('customers').delete().eq('id', id).eq('user_id', userId);
-  }
+  //
+  // NOTE (credit-ledger removal): the customer-ledger feature (customer list
+  // with outstanding balances, opening balance, running balance, payment/
+  // deposit settlement) has been removed from the app. What remains is just
+  // enough to keep recording each bill's is_credit/transaction_type
+  // (checkout() below) and to let a customer name be typed/picked at
+  // billing time (fetchCustomerNames(), ensureCustomerExists()). The
+  // `customers` table itself, and its opening_balance/running_balance
+  // columns, are untouched server-side — only the app-side ledger UI and its
+  // supporting calls (fetchCustomers, fetchTotalOutstanding, fetchCustomerLedger,
+  // fetchCustomerBills, createCustomer, updateCustomer, deleteCustomer,
+  // recordPayment, recordDeposit) were removed.
 
   // Called before checkout to ensure customer exists in the customers table.
   // Uses case-insensitive lookup first to avoid creating "Mayank"/"mayank"
@@ -457,149 +344,6 @@ class SupabaseService {
     } catch (_) {
       // Non-fatal — checkout can proceed even if customer row is missing.
     }
-  }
-
-  // ── Customer Ledger ────────────────────────────────────────────────────────
-
-  static Future<List<Map<String, dynamic>>> fetchCustomerLedger(
-      String customerName) async {
-    final userId = _userId;
-    if (userId == null) return [];
-
-    // ilike = case-insensitive match — fixes "Mayank"/"mayank" split (#58).
-    final res = await _client
-        .from('past_bills')
-        .select(
-            'total_amount, is_credit, nagad_amount, transaction_type, created_at')
-        .eq('user_id', userId)
-        .ilike('customer_name', customerName.trim())
-        .order('created_at',
-            ascending:
-                true); // ascending: running-balance computation needs oldest-first
-
-    return (res as List).map((bill) {
-      final txType = bill['transaction_type']?.toString();
-      final nagad = (bill['nagad_amount'] as num?)?.toDouble() ?? 0;
-      // transaction_type is authoritative (covers 'deposit' too); fall back to
-      // is_credit/nagad only for old rows written before that column existed.
-      final resolvedType = (txType != null && txType.isNotEmpty)
-          ? txType
-          : (bill['is_credit'] == true
-              ? (nagad > 0 ? 'split' : 'credit')
-              : 'sale');
-      return {
-        'type': resolvedType,
-        'amount': (bill['total_amount'] as num?)?.toDouble() ?? 0,
-        'nagad_amount': nagad,
-        // Keep raw string; .toLocal() applied at display site via DateTime.parse.
-        'created_at': bill['created_at']?.toString(),
-      };
-    }).toList();
-  }
-
-  // Server-filtered bill history for a single customer — mirrors
-  // fetchCustomerLedger's .ilike('customer_name', ...) pattern above, but
-  // returns full Bill objects (like fetchPastBills()) for the "बिल इतिहास"
-  // list on the customer-detail screen. Replaces the old pattern of calling
-  // fetchPastBills() (whole shop, unfiltered) and filtering client-side.
-  static Future<List<Bill>> fetchCustomerBills(String customerName) async {
-    final userId = _userId;
-    if (userId == null) return [];
-
-    final res = await _client
-        .from('past_bills')
-        .select('*')
-        .eq('user_id', userId)
-        .ilike('customer_name', customerName.trim())
-        .order('created_at', ascending: false);
-
-    return (res as List).map((e) => Bill.fromMap(e)).toList();
-  }
-
-  static Future<void> recordPayment({
-    required String customerName,
-    required double amount,
-  }) async {
-    final userId = _userId;
-    if (userId == null) throw Exception('Not authenticated');
-
-    if (customerName.trim().isNotEmpty) {
-      await ensureCustomerExists(customerName);
-    }
-
-    final response = await http.post(
-      Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-checkout/'),
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Api-Key': SupabaseConfig.apiSecret
-      },
-      body: jsonEncode({
-        'user_id': userId,
-        'total_bill_amount': amount,
-        'discount_amount': 0,
-        'customer_name': customerName,
-        'is_credit': false,
-        // Explicit type so the backend doesn't derive 'sale' from is_credit=false.
-        'transaction_type': 'payment',
-        'items': [
-          {
-            'stock_id': null,
-            'new_stock': null,
-            'item_name': 'भुगतान (Payment Received)',
-            'quantity_billed': 1,
-            'price_per_unit': amount,
-            'item_total': amount,
-            'error': false,
-          }
-        ],
-      }),
-    );
-
-    _checkCheckoutResponse(response, 'Payment failed');
-  }
-
-  // Record an advance deposit — customer pays in ahead of any bill.
-  // Stored as transaction_type='deposit', is_credit=false.
-  // Reduces outstanding; if it exceeds balance, outstanding goes negative (credit).
-  static Future<void> recordDeposit({
-    required String customerName,
-    required double amount,
-  }) async {
-    final userId = _userId;
-    if (userId == null) throw Exception('Not authenticated');
-
-    if (customerName.trim().isNotEmpty) {
-      await ensureCustomerExists(customerName);
-    }
-
-    final response = await http.post(
-      Uri.parse('${SupabaseConfig.railwayBaseUrl}/voice-checkout/'),
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Api-Key': SupabaseConfig.apiSecret
-      },
-      body: jsonEncode({
-        'user_id': userId,
-        'total_bill_amount': amount,
-        'discount_amount': 0,
-        'customer_name': customerName,
-        'is_credit': false,
-        'transaction_type': 'deposit',
-        'items': [
-          {
-            'stock_id': null,
-            'new_stock': null,
-            'item_name': 'अग्रिम जमा (Advance Deposit)',
-            'quantity_billed': 1,
-            'price_per_unit': amount,
-            'item_total': amount,
-            'error': false,
-          }
-        ],
-      }),
-    );
-
-    _checkCheckoutResponse(response, 'Deposit failed');
   }
 
   // ── Stock History ───────────────────────────────────────────────────────────
@@ -634,24 +378,6 @@ class SupabaseService {
 
     if ((res as List).isEmpty) return null;
     return StockHistoryEntry.fromMap(res.first);
-  }
-
-  // Units of a stock item sold this calendar month — scanned from bill_details
-  // Returns true if a customer with [name] (case-insensitive) already exists
-  // for this user, ignoring the customer with [excludeId] (for rename check #41).
-  static Future<bool> checkCustomerNameExists(String name,
-      {String? excludeId}) async {
-    final userId = _userId;
-    if (userId == null) return false;
-    // ilike = case-insensitive — catches "Ram" / "ram" / "RAM" as the same name.
-    // excludeId filters out the customer being renamed so a no-op rename passes.
-    final res = await _client
-        .from('customers')
-        .select('id')
-        .eq('user_id', userId)
-        .ilike('name', name.trim());
-    if (excludeId == null) return (res as List).isNotEmpty;
-    return (res as List).any((row) => row['id']?.toString() != excludeId);
   }
 
   // Returns true if another user_stock item (different id) already has [name]

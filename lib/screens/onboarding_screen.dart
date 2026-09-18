@@ -36,8 +36,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       color: Color(0xFFDC2626),
       bgColor: Color(0xFFFEF2F2),
       title: 'उधार का हिसाब',
-      subtitle: 'हर ग्राहक का बकाया एक जगह — कब दिया, कब मिला सब दर्ज',
-      hint: 'भुगतान मिलने पर तुरंत दर्ज करें',
+      subtitle: 'हर बिल में दर्ज करें — नकद मिला या उधार दिया',
+      hint: 'हर बिक्री का रिकॉर्ड रिपोर्ट में मिलेगा',
     ),
   ];
 
