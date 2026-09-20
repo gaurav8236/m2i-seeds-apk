@@ -52,10 +52,6 @@ class _HomeScreenState extends State<HomeScreen> {
         return DateTimeRange(
             start: DateTime(now.year, now.month, 1),
             end: DateTime(now.year, now.month + 1, 1));
-      case StatsPeriod.custom:
-        return DateTimeRange(
-            start: DateTime(now.year, now.month, 1),
-            end: DateTime(now.year, now.month + 1, 1));
     }
   }
 
@@ -86,37 +82,6 @@ class _HomeScreenState extends State<HomeScreen> {
       debugPrint('Home load error: $e');
     } finally {
       setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _pickCustomRange() async {
-    final now = DateTime.now();
-    final picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(now.year - 1),
-      lastDate: now,
-      builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(
-          colorScheme: const ColorScheme.light(primary: AppColors.primary),
-        ),
-        child: child!,
-      ),
-    );
-    if (picked != null) {
-      if (!mounted) return;
-      setState(() => _period = StatsPeriod.custom);
-      setState(() => _loading = true);
-      try {
-        final stats = await SupabaseService.fetchFilteredStats(
-            from: picked.start, to: picked.end);
-        if (!mounted) return;
-        setState(() {
-          _credit = stats['credit'] ?? 0;
-          _paid = stats['paid'] ?? 0;
-        });
-      } finally {
-        if (mounted) setState(() => _loading = false);
-      }
     }
   }
 
@@ -196,8 +161,6 @@ class _HomeScreenState extends State<HomeScreen> {
                               _periodChip('यह हफ़्ता', StatsPeriod.thisWeek),
                               const SizedBox(width: 8),
                               _periodChip('यह महीना', StatsPeriod.thisMonth),
-                              const SizedBox(width: 8),
-                              _customChip(),
                             ],
                           ),
                         ),
@@ -325,31 +288,6 @@ class _HomeScreenState extends State<HomeScreen> {
             color: active ? AppColors.primary : Colors.white,
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _customChip() {
-    final active = _period == StatsPeriod.custom;
-    return GestureDetector(
-      onTap: _pickCustomRange,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-        decoration: BoxDecoration(
-          color: active ? Colors.white : Colors.white.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.white.withValues(alpha: active ? 0 : 0.3)),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.date_range, size: 12,
-              color: active ? AppColors.primary : Colors.white),
-          const SizedBox(width: 4),
-          Text('कस्टम',
-              style: TextStyle(
-                fontSize: 12, fontWeight: FontWeight.w600,
-                color: active ? AppColors.primary : Colors.white,
-              )),
-        ]),
       ),
     );
   }

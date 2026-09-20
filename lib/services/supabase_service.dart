@@ -6,7 +6,7 @@ import '../models/models.dart';
 import '../supabase_config.dart';
 import 'auth_service.dart';
 
-enum StatsPeriod { today, thisWeek, thisMonth, custom }
+enum StatsPeriod { today, thisWeek, thisMonth }
 
 // Bug fix (Sprint 7): /voice-checkout/ can return HTTP 200 with
 // {"status": "partial", "oversold": [...]}  when an item's requested

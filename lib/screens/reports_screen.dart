@@ -19,50 +19,53 @@ import '../widgets/bill_card.dart';
 // and must keep being excluded from the sales totals below.
 const _nonSaleTransactionTypes = {'payment', 'deposit', 'cash_loan'};
 
-// Pure summary result for the Reports screen's 3 sales-summary cards.
-// Extracted out of `_ReportsScreenState._reportsTab()` (BUG-13) so it can be
-// unit-tested without a live Supabase call/mock — mirrors the seam
-// SupabaseService.bucketFilteredStats() added for BUG-12.
+// One row of the Reports screen's "ग्राहक" view: every bill for a customer
+// rolled up into a count and a total.
 @visibleForTesting
-class ReportsSalesSummary {
-  final double cashTotal;
-  final double creditTotal;
-  final int cashCount;
-  final int creditCount;
-  final int salesCount;
-  const ReportsSalesSummary({
-    required this.cashTotal,
-    required this.creditTotal,
-    required this.cashCount,
-    required this.creditCount,
-    required this.salesCount,
+class CustomerBillTotal {
+  final String name;
+  final int billCount;
+  final double totalAmount;
+  const CustomerBillTotal({
+    required this.name,
+    required this.billCount,
+    required this.totalAmount,
   });
 }
 
-// Partitions `bills` (already period/type-filtered by the caller) into
-// cash/credit sales totals, excluding payment/deposit/cash_loan rows from
-// all three summary numbers (BUG-13) — the bill list rendered below the
-// cards is untouched by this function; it keeps showing every filtered bill.
+// Groups `bills` (already period/type-filtered by the caller) by customer,
+// largest total first. Names are matched case-insensitively on the trimmed
+// value (same rule as ensureCustomerExists, #58); bills with no customer name
+// are grouped as "नकद ग्राहक", matching BillCard. payment/deposit/cash_loan
+// rows are excluded (BUG-13) — they are not sales.
 @visibleForTesting
-ReportsSalesSummary computeReportsSalesSummary(List<Bill> bills) {
-  final salesBills = bills
-      .where((b) => !_nonSaleTransactionTypes.contains(b.transactionType))
-      .toList();
-  final creditBills = salesBills.where((b) => b.isCredit).toList();
-  final cashBills = salesBills.where((b) => !b.isCredit).toList();
-  return ReportsSalesSummary(
-    cashTotal: cashBills.fold(0.0, (s, b) => s + b.totalAmount),
-    creditTotal: creditBills.fold(0.0, (s, b) => s + b.totalAmount),
-    cashCount: cashBills.length,
-    creditCount: creditBills.length,
-    salesCount: salesBills.length,
-  );
+List<CustomerBillTotal> aggregateBillsByCustomer(List<Bill> bills) {
+  final groups = <String, ({String name, int count, double total})>{};
+  for (final b in bills) {
+    if (_nonSaleTransactionTypes.contains(b.transactionType)) continue;
+    final name = (b.customerName ?? '').trim();
+    final key = name.toLowerCase();
+    final prev = groups[key];
+    groups[key] = (
+      // First-seen casing is kept for display.
+      name: prev?.name ?? (name.isEmpty ? 'नकद ग्राहक' : name),
+      count: (prev?.count ?? 0) + 1,
+      total: (prev?.total ?? 0) + b.totalAmount,
+    );
+  }
+  return groups.values
+      .map((g) => CustomerBillTotal(
+          name: g.name, billCount: g.count, totalAmount: g.total))
+      .toList()
+    ..sort((a, b) => b.totalAmount.compareTo(a.totalAmount));
 }
+
+enum _ReportView { bills, customers }
 
 // ── Reports screen ───────────────────────────────────────────────────────────
 //
-// Sales reporting only — period filters + नकद/उधार/कुल summary cards + bill
-// history. The customer-ledger tab (customer list, outstanding balances,
+// Sales reporting only — period filters + a बिल / ग्राहक switch (every bill,
+// or totals per customer). The customer-ledger tab (customer list, outstanding balances,
 // opening balance, payment/deposit settlement) that used to live alongside
 // this has been removed entirely; every bill still records is_credit /
 // transaction_type at checkout time (voice_billing_screen.dart), this screen
@@ -80,9 +83,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   // Stats + filter
   StatsPeriod _period = StatsPeriod.thisMonth;
-  DateTimeRange? _customRange;
   double _credit = 0, _paid = 0;
   BillTypeFilter _typeFilter = BillTypeFilter.all;
+  _ReportView _view = _ReportView.bills;
 
   // Reports
   List<Bill> _allBills = [];
@@ -97,10 +100,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
   DateTimeRange _rangeFor(StatsPeriod p) {
     final now = DateTime.now();
     switch (p) {
-      // Use exclusive-midnight upper bounds for all periods — same pattern as the
-      // custom range fix (Sprint 6). DateTime handles day/month overflow correctly
-      // (e.g. day 32 → next month, month 13 → next year).  fetchFilteredStats
-      // converts these local (IST) DateTimes to UTC before the Supabase query. (#47)
+      // Use exclusive-midnight upper bounds for all periods. DateTime handles
+      // day/month overflow correctly (e.g. day 32 → next month, month 13 → next
+      // year).  fetchFilteredStats converts these local (IST) DateTimes to UTC
+      // before the Supabase query. (#47)
       case StatsPeriod.today:
         return DateTimeRange(
             start: DateTime(now.year, now.month, now.day),
@@ -114,29 +117,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
         return DateTimeRange(
             start: DateTime(now.year, now.month, 1),
             end: DateTime(now.year, now.month + 1, 1));
-      case StatsPeriod.custom:
-        final cr = _customRange;
-        if (cr == null) {
-          // Null fallback uses thisMonth bounds — consistent exclusive midnight (#47)
-          return DateTimeRange(
-              start: DateTime(now.year, now.month, 1),
-              end: DateTime(now.year, now.month + 1, 1));
-        }
-        // The date picker returns `end` as midnight of the chosen day (exclusive
-        // start of that day). We need to include the full chosen end-day, so
-        // advance to midnight of the NEXT day — the exclusive upper bound.
-        //
-        // _filteredBills adds Duration(days:1) to range.end before comparing, so
-        // using 23:59:59 here would cause it to include one extra day.  Midnight-
-        // of-next-day is the correct value: server query gets all IST bills up to
-        // 23:59:59 on the end-day; client filter gets midnight+1-day which is a
-        // harmless ceiling since no future bills exist (#16).
-        //
-        // DateTime handles day overflow correctly (e.g. day 32 → next month).
-        return DateTimeRange(
-          start: cr.start,
-          end: DateTime(cr.end.year, cr.end.month, cr.end.day + 1),
-        );
     }
   }
 
@@ -159,26 +139,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
       _showSnack('लोड नहीं हो सका: $e');
     } finally {
       setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _pickCustomRange() async {
-    final now = DateTime.now();
-    final picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(now.year - 1),
-      lastDate: now,
-      builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(
-          colorScheme: const ColorScheme.light(primary: AppColors.primary),
-        ),
-        child: child!,
-      ),
-    );
-    if (picked != null) {
-      _customRange = picked;
-      setState(() => _period = StatsPeriod.custom);
-      _load();
     }
   }
 
@@ -258,8 +218,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     _periodChip('यह हफ़्ता', StatsPeriod.thisWeek),
                     const SizedBox(width: 8),
                     _periodChip('यह महीना', StatsPeriod.thisMonth),
-                    const SizedBox(width: 8),
-                    _customChip(),
                   ]),
                 ),
                 const SizedBox(height: 12),
@@ -308,32 +266,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
-  Widget _customChip() {
-    final active = _period == StatsPeriod.custom;
-    return GestureDetector(
-      onTap: _pickCustomRange,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-        decoration: BoxDecoration(
-          color: active ? Colors.white : Colors.white.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-              color: Colors.white.withValues(alpha: active ? 0 : 0.3)),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.date_range,
-              size: 12, color: active ? AppColors.primary : Colors.white),
-          const SizedBox(width: 4),
-          Text('कस्टम',
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: active ? AppColors.primary : Colors.white)),
-        ]),
-      ),
-    );
-  }
-
   Widget _headerStat(String label, String value) {
     return Column(children: [
       Text(value,
@@ -362,12 +294,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Widget _reportsBody() {
     if (_loading) return const Center(child: CircularProgressIndicator());
     final bills = _filteredBills;
-    // Summary cards exclude payment/deposit/cash_loan rows (BUG-13); the
-    // bill list rendered below the cards keeps showing every filtered bill,
-    // including these types — this fix is scoped to the summary numbers only.
-    final summary = computeReportsSalesSummary(bills);
-    final creditTotal = summary.creditTotal;
-    final cashTotal = summary.cashTotal;
+    final customers =
+        _view == _ReportView.customers ? aggregateBillsByCustomer(bills) : [];
+    final isBills = _view == _ReportView.bills;
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -376,38 +305,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
         children: [
           Row(children: [
             Expanded(
-                child: _summaryCard(
-                    'नकद बिक्री',
-                    cashTotal,
-                    summary.cashCount,
-                    AppColors.success,
-                    AppColors.successLight,
-                    Icons.payments_outlined)),
+                child: _viewButton('बिल', Icons.receipt_long_outlined,
+                    _ReportView.bills)),
             const SizedBox(width: 10),
             Expanded(
-                child: _summaryCard(
-                    'उधार बिक्री',
-                    creditTotal,
-                    summary.creditCount,
-                    AppColors.danger,
-                    AppColors.dangerLight,
-                    Icons.credit_card_outlined)),
+                child: _viewButton('ग्राहक', Icons.people_outline,
+                    _ReportView.customers)),
           ]),
-          const SizedBox(height: 10),
-          _summaryCard(
-              'कुल बिक्री',
-              cashTotal + creditTotal,
-              summary.salesCount,
-              AppColors.primary,
-              AppColors.primaryLight,
-              Icons.receipt_long_outlined,
-              wide: true),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('बिल इतिहास',
-                  style: TextStyle(
+              Text(isBills ? 'बिल इतिहास' : 'ग्राहक अनुसार कुल',
+                  style: const TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13,
                       color: AppColors.textPrimary)),
@@ -418,7 +328,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          if (bills.isEmpty)
+          if (isBills && bills.isEmpty || !isBills && customers.isEmpty)
             const Center(
               child: Padding(
                 padding: EdgeInsets.all(24),
@@ -426,81 +336,95 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     style: TextStyle(color: AppColors.textMuted)),
               ),
             )
-          else
+          else if (isBills)
             ListView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               padding: EdgeInsets.zero,
               itemCount: bills.length,
               itemBuilder: (_, i) => BillCard(bill: bills[i]),
+            )
+          else
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: EdgeInsets.zero,
+              itemCount: customers.length,
+              itemBuilder: (_, i) => _customerRow(customers[i]),
             ),
         ],
       ),
     );
   }
 
-  Widget _summaryCard(String label, double amount, int count, Color color,
-      Color bgColor, IconData icon,
-      {bool wide = false}) {
+  Widget _viewButton(String label, IconData icon, _ReportView view) {
+    final active = _view == view;
+    return GestureDetector(
+      onTap: () => setState(() => _view = view),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: active ? AppColors.primary : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: active ? AppColors.primary : AppColors.border),
+        ),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon,
+              size: 18, color: active ? Colors.white : AppColors.textSecondary),
+          const SizedBox(width: 8),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: active ? Colors.white : AppColors.textSecondary)),
+        ]),
+      ),
+    );
+  }
+
+  Widget _customerRow(CustomerBillTotal c) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
       ),
-      child: wide
-          ? Row(children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                    color: bgColor, borderRadius: BorderRadius.circular(10)),
-                child: Icon(icon, color: color, size: 20),
-              ),
-              const SizedBox(width: 12),
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(label,
-                    style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textMuted,
-                        fontWeight: FontWeight.w600)),
-                Text(_fmt(amount),
-                    style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 20,
-                        color: color,
-                        letterSpacing: -0.5)),
-                Text('$count बिल',
-                    style: const TextStyle(
-                        fontSize: 11, color: AppColors.textMuted)),
-              ]),
-            ])
-          : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                    color: bgColor, borderRadius: BorderRadius.circular(10)),
-                child: Icon(icon, color: color, size: 18),
-              ),
-              const SizedBox(height: 10),
-              Text(label,
-                  style: const TextStyle(
-                      fontSize: 11,
-                      color: AppColors.textMuted,
-                      fontWeight: FontWeight.w600)),
-              const SizedBox(height: 3),
-              Text(_fmt(amount),
-                  style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 18,
-                      color: color,
-                      letterSpacing: -0.5)),
-              Text('$count बिल',
-                  style: const TextStyle(
-                      fontSize: 11, color: AppColors.textMuted)),
-            ]),
+      child: Row(children: [
+        Container(
+          width: 38,
+          height: 38,
+          decoration: const BoxDecoration(
+              shape: BoxShape.circle, color: AppColors.primaryLight),
+          child: Center(
+            child: Text(c.name.isNotEmpty ? c.name[0].toUpperCase() : '?',
+                style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
+                    color: AppColors.primary)),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(c.name,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                    color: AppColors.textPrimary)),
+            Text('${c.billCount} बिल',
+                style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+          ]),
+        ),
+        Text(_fmt(c.totalAmount),
+            style: const TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 15,
+                color: AppColors.primary)),
+      ]),
     );
   }
 }
