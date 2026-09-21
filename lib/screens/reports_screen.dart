@@ -222,12 +222,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 ),
                 const SizedBox(height: 12),
 
-                // Stats — period-filtered नकद जमा / उधार दिया only (no
-                // all-time outstanding/balance figure — see file header note).
+                // Stats — all three follow the period chips above and come from
+                // the same fetchFilteredStats() call, so कुल बिक्री is always
+                // exactly उधार दिया + नकद जमा. No all-time outstanding/balance
+                // figure — see file header note.
                 Row(children: [
                   Expanded(child: _headerStat('उधार दिया', _fmt(_credit))),
                   _vDivider(),
                   Expanded(child: _headerStat('नकद जमा', _fmt(_paid))),
+                  _vDivider(),
+                  Expanded(
+                      child: _headerStat('कुल बिक्री', _fmt(_credit + _paid))),
                 ]),
               ]),
             ),
